@@ -157,12 +157,14 @@ without them is recorded here.
 - **Reversibility:** cheap but legally meaningful; recorded as an assumption.
 - **Risk if wrong:** user wanted a different license; single manifest edit plus file headers.
 
-### D18 — Commit locally in phases, never push
-- **Because:** autopilot may commit locally; pushing/PRs are outward-facing and blocked. History
-  is split so a failed later phase does not bury working earlier phases.
+### D18 — Commit in phases; push checkpoints when explicitly authorized
+- **Because:** autopilot may commit locally; pushing is outward-facing and needs explicit user
+  authorization. The user later authorized checkpoints to `github.com/asterxsk/doodleverse`, so
+  pushes are allowed for this run. History stays split so a failed later phase does not bury
+  working earlier phases.
 - **Alternatives:** one giant commit (harder to audit); no commits (loses the record).
 - **Reversibility:** cheap (local history).
-- **Risk if wrong:** none material.
+- **Risk if wrong:** none material; pushed content is public, so each checkpoint is verified first.
 
 ### D19 — Floating Excalidraw-style toolbox, zen mode on Alt+Z
 - **Because:** the user asked for Excalidraw's floating toolbox and its keybind. Excalidraw keeps
@@ -222,11 +224,13 @@ without them is recorded here.
 - **B04 — ACP agent containment (P15).** Needs sandbox/containment decisions and installed agent
   binaries. Resume only after the user chooses the containment boundary; the current AI boundary
   deliberately carries one question and no board/path/tool content.
-- **B05 — OS vault + hardware pen pressure (P04a).** Needs platform keychain APIs and a tablet to
-  verify. Resume with `keyring` or native APIs behind a credential store trait, and winit tablet
-  events feeding `RawSample::pressure`.
+- **B05 — OS vault + non-Windows pen pressure (P04a).** Windows pen pressure is implemented (D21)
+  but cannot be verified without a tablet. Other platforms still use simulated pressure. The OS
+  vault needs platform keychain APIs and a chosen credential policy. Resume with vault adapters
+  behind a credential-store trait and native pointer probes per platform.
 - **B06 — Packaging, signing, release (P17/P20).** Needs signing identities and store accounts.
   Resume with `cargo-bundle`/MSIX/notarization as chosen by the user; the window icon is already
   embedded from the approved PNG.
-- **B07 — Push / PR.** No remote push or PR was created. Resume with `git push` and a PR if
-  desired; local commits are on `main` (or the working branch recorded in the close-out).
+- **B07 — PR / release publication.** Checkpoints are pushed to `main` on
+  `https://github.com/asterxsk/doodleverse` under explicit authorization. No pull request or
+  release was created. Resume with a PR/branch review or a tagged release if desired.
