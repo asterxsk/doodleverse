@@ -1,0 +1,116 @@
+{
+  "schema_version": 2,
+  "name": "Dibby",
+  "source": "dibby.svg",
+  "atlas": {
+    "file": "dibby-atlas.png",
+    "frame_width": 160,
+    "frame_height": 160,
+    "columns": 12,
+    "rows": 16,
+    "width": 1920,
+    "height": 2560,
+    "frame_count": 181,
+    "premultiplied_alpha": false
+  },
+  "states": {
+    "neutral": {
+      "first_frame": 0,
+      "frame_count": 1,
+      "duration_ms": 0,
+      "loop": false
+    },
+    "idle": {
+      "first_frame": 1,
+      "frame_count": 36,
+      "duration_ms": 2400,
+      "loop": true
+    },
+    "hover": {
+      "first_frame": 37,
+      "frame_count": 36,
+      "duration_ms": 600,
+      "loop": false
+    },
+    "talking": {
+      "first_frame": 73,
+      "frame_count": 36,
+      "duration_ms": 1200,
+      "loop": true
+    },
+    "thinking": {
+      "first_frame": 109,
+      "frame_count": 36,
+      "duration_ms": 3000,
+      "loop": true
+    },
+    "working": {
+      "first_frame": 145,
+      "frame_count": 36,
+      "duration_ms": 3000,
+      "loop": true
+    }
+  },
+  "controller": {
+    "priority": [
+      "reduced_motion",
+      "talking",
+      "hover",
+      "busy",
+      "idle"
+    ],
+    "busy": {
+      "sequence": [
+        {
+          "state": "thinking",
+          "duration_ms": 3000
+        },
+        {
+          "state": "working",
+          "duration_ms": 3000
+        }
+      ],
+      "loop": true,
+      "clock": "time since busy began; overlays do not reset"
+    },
+    "hover": {
+      "duration_ms": 600,
+      "trigger": "pointer or keyboard focus enters",
+      "retrigger": "after leaving then entering",
+      "on_complete": "resume underlying busy or idle; do not repeat while hovered"
+    },
+    "reduced_motion": "show neutral frame 0; expose actual status as text"
+  },
+  "rig": {
+    "view_box": [
+      0,
+      0,
+      1254,
+      1254
+    ],
+    "pivot": [
+      630,
+      640
+    ],
+    "part_pivots": {
+      "laptop": [
+        1050,
+        990
+      ]
+    },
+    "layers": [
+      "float",
+      "body-rock",
+      "orbit-back-motion",
+      "orbit-front-motion",
+      "gaze",
+      "eyes-motion",
+      "mouth-smile",
+      "mouth-talk",
+      "mouth-think",
+      "thought-cloud",
+      "laptop"
+    ]
+  },
+  "source_sha256": "8d1a49bbdd6344a183e1a338eab1d1627a1bf7c021a0e7cf3c4a28ec43f15da8"
+}

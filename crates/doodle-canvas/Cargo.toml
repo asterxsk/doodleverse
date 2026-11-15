@@ -1,0 +1,12 @@
+[package]
+name = "doodle-canvas"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Pure camera, brush, geometry, and hit-testing logic for Doodleverse"
+
+[dependencies]
+doodle-types = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

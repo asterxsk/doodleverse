@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" class="state-idle" role="img" aria-labelledby="dibby-title dibby-desc">
+  <title id="dibby-title">Dibby</title>
+  <desc id="dibby-desc">Doodleverse's friendly cream paper mascot with a folded corner and a coral and teal painted orbit. Editable transparent vector with optional thought-cloud and laptop layers.</desc>
+  <style>
+svg { overflow: visible; }
+#float, #body-rock, #orbit-back-motion, #orbit-front-motion, #eyes-motion, #mouth-talk, #thought-cloud, #laptop {
+  transform-box: view-box; transform-origin: 630px 640px;
+}
+#eyes-motion { transform-origin: 600px 535px; }
+#mouth-talk { transform-origin: 655px 645px; }
+#laptop { transform-origin: 1050px 990px; }
+@keyframes idle-float { 0%,100% {transform:translateY(0)} 50% {transform:translateY(-24px)} }
+@keyframes idle-rock { 0%,50%,100% {transform:rotate(0)} 25% {transform:rotate(1.8deg)} 75% {transform:rotate(-1.8deg)} }
+@keyframes idle-ring { 0%,50%,100% {transform:rotate(0)} 25% {transform:rotate(-2deg)} 75% {transform:rotate(2deg)} }
+@keyframes hover-jump { 0%,100% {transform:translateY(0)} 50% {transform:translateY(-62px)} }
+@keyframes hover-rock { 0%,50%,100% {transform:rotate(0)} 25% {transform:rotate(-2deg)} 75% {transform:rotate(2deg)} }
+@keyframes hover-ring { 0%,50%,100% {transform:rotate(0)} 25% {transform:rotate(1.2deg)} 75% {transform:rotate(-1.2deg)} }
+@keyframes talk-float { 0%,50%,100% {transform:translateY(0)} 25%,75% {transform:translateY(-10px)} }
+@keyframes talk-rock { 0%,50%,100% {transform:rotate(0)} 25% {transform:rotate(1.2deg)} 75% {transform:rotate(-1.2deg)} }
+@keyframes talk-mouth { 0%,100% {transform:scaleY(.25)} 50% {transform:scaleY(1)} }
+@keyframes think-float { 0%,100% {transform:translateY(0)} 50% {transform:translateY(-10px)} }
+@keyframes think-rock { 0%,50%,100% {transform:rotate(-4deg)} 25% {transform:rotate(-2.5deg)} 75% {transform:rotate(-5.5deg)} }
+@keyframes think-ring { 0%,50%,100% {transform:rotate(0)} 25% {transform:rotate(2.5deg)} 75% {transform:rotate(-2.5deg)} }
+@keyframes think-blink { 0%,59.5%,70.5%,100% {transform:scaleY(1)} 65% {transform:scaleY(.08)} }
+@keyframes work-float { 0%,100% {transform:translateY(0)} 50% {transform:translateY(-14px)} }
+@keyframes work-rock { 0%,50%,100% {transform:rotate(0)} 25% {transform:rotate(2.5deg)} 75% {transform:rotate(-2.5deg)} }
+@keyframes work-ring { 0%,50%,100% {transform:rotate(0)} 25% {transform:rotate(4deg)} 75% {transform:rotate(-4deg)} }
+@keyframes cloud-float {0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+@keyframes laptop-type {0%,50%,100%{transform:translateY(0) rotate(0)}25%{transform:translateY(-2px) rotate(-.8deg)}75%{transform:translateY(-2px) rotate(.8deg)}}
+.state-idle #float {animation:idle-float 2.4s ease-in-out infinite}
+.state-idle #body-rock {animation:idle-rock 2.4s ease-in-out infinite}
+.state-idle #orbit-back-motion,.state-idle #orbit-front-motion {animation:idle-ring 2.4s ease-in-out infinite}
+.state-hover #float {animation:hover-jump .6s ease-in-out 1 both}
+.state-hover #body-rock {animation:hover-rock .6s ease-in-out 1 both}
+.state-hover #orbit-back-motion,.state-hover #orbit-front-motion {animation:hover-ring .6s ease-in-out 1 both}
+.state-talking #float {animation:talk-float 1.2s ease-in-out infinite}
+.state-talking #body-rock {animation:talk-rock 1.2s ease-in-out infinite}
+.state-talking #mouth-smile,.state-thinking #mouth-smile {opacity:0}
+.state-talking #mouth-talk {opacity:1;animation:talk-mouth .2s ease-in-out infinite}
+.state-thinking #float {animation:think-float 3s ease-in-out infinite}
+.state-thinking #body-rock {animation:think-rock 3s ease-in-out infinite}
+.state-thinking #orbit-back-motion,.state-thinking #orbit-front-motion {animation:think-ring 3s ease-in-out infinite}
+.state-thinking #eyes-motion {animation:think-blink 3s ease-in-out infinite}
+.state-thinking #gaze {transform:translate(-12px,-19px)}
+.state-thinking #mouth-think {opacity:1}
+.state-thinking #thought-cloud {opacity:1;animation:cloud-float 3s ease-in-out infinite}
+.state-working #float {animation:work-float 1s ease-in-out infinite}
+.state-working #body-rock {animation:work-rock 1s ease-in-out infinite}
+.state-working #orbit-back-motion,.state-working #orbit-front-motion {animation:work-ring 1.5s ease-in-out infinite}
+.state-working #gaze {transform:translate(18px,13px)}
+.state-working #laptop {opacity:1;animation:laptop-type 1s ease-in-out infinite}
+@media (prefers-reduced-motion: reduce) {
+  * {animation:none!important;transform:none!important}
+  #mouth-smile {opacity:1!important} #mouth-talk,#mouth-think {opacity:0!important}
+  #thought-cloud,#laptop {opacity:0!important}
+}
+</style>
+  <defs>
+    <linearGradient id="paper" x1="300" y1="280" x2="850" y2="1030" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff4cf"/><stop offset=".65" stop-color="#ffedbf"/><stop offset="1" stop-color="#ffdaa6"/>
+    </linearGradient>
+    <linearGradient id="fold" x1="810" y1="245" x2="865" y2="382" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff7da"/><stop offset="1" stop-color="#ffe3b0"/>
+    </linearGradient>
+    <linearGradient id="teal" x1="680" y1="865" x2="1130" y2="400" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#29c9ba"/><stop offset="1" stop-color="#46e2cd"/>
+    </linearGradient>
+  </defs>
+  <g id="float">
+    <g id="orbit-back-motion">
+      <g id="orbit-back">
+        <path id="orbit-back-coral" fill="#ff827c" d="M927 327 C999 294 1094 302 1157 339 L1134 369 C1062 339 1015 362 958 385 Z"/>
+        <path id="orbit-back-teal" fill="url(#teal)" d="M1114 326 C1179 325 1224 356 1220 413 C1218 465 1175 512 1121 551 L1080 515 C1128 471 1159 435 1154 409 C1148 384 1117 375 1077 370 Z"/>
+        <path fill="#35d3c3" d="M1157 336 L1182 346 1150 342 1166 357 1127 343 1146 346 1121 332 Z"/>
+      </g>
+    </g>
+    <g id="body-rock">
+      <g id="paper-body">
+        <path id="body-outline" fill="url(#paper)" stroke="#2d082b" stroke-width="19" stroke-linejoin="round" d="M761 226 C716 215 689 246 646 268 C585 300 534 316 470 310 C398 299 339 303 295 321 C250 340 226 380 240 433 C254 489 268 549 273 605 C282 661 266 747 273 831 C279 903 267 985 307 1022 C339 1051 381 1028 419 1015 C478 996 537 1021 607 1024 C671 1027 714 1035 771 1020 C844 1006 900 983 944 945 C1003 892 1008 812 989 727 L966 606 C952 537 948 492 951 435 C955 387 950 354 929 322 C890 275 819 227 779 225 Z"/>
+        <path id="paper-bottom-shade" fill="#ffd59e" opacity=".43" d="M287 942 C334 983 376 1002 423 983 C476 965 508 978 552 982 C611 988 645 995 695 989 C767 1005 889 977 936 936 C895 983 831 1006 771 1020 C714 1035 671 1027 607 1024 C537 1021 478 996 419 1015 C381 1028 339 1051 307 1022 C289 1005 283 977 287 942 Z"/>
+      </g>
+      <g id="paper-fold">
+        <path id="fold-shadow" fill="#f3be87" opacity=".48" d="M785 265 C813 305 874 359 944 380 L953 416 C895 406 837 395 793 374 Z"/>
+        <path id="fold-face" fill="url(#fold)" stroke="#2d082b" stroke-width="18" stroke-linejoin="round" d="M778 229 C795 265 783 314 780 346 C777 366 786 375 807 372 C855 361 903 360 943 379 C921 319 843 248 778 229 Z"/>
+      </g>
+      <g id="face">
+        <g id="gaze">
+          <g id="eyes-motion" fill="#2d082b">
+            <path id="eye-left" d="M455 488 C432 475 406 489 389 511 C363 540 350 581 358 609 C362 626 376 638 391 639 C374 624 375 599 382 578 C387 561 394 549 403 541 C402 566 414 589 433 601 C455 616 473 613 482 595 C497 565 479 513 455 488 Z"/>
+            <path id="eye-right" d="M762 439 C736 426 710 440 696 461 C675 486 668 519 677 548 C680 561 688 567 695 570 C685 546 690 521 702 503 C710 490 718 481 727 477 C723 497 730 520 748 533 C771 547 794 545 807 528 C825 504 804 461 782 446 C775 443 769 440 762 439 Z"/>
+          </g>
+        </g>
+        <g id="mouth-smile" fill="#2d082b">
+          <path d="M605 631 C624 648 646 652 666 637 C681 628 686 617 690 601 C694 586 709 590 710 603 C714 628 698 650 679 660 C652 678 618 668 602 654 C591 643 594 633 605 631 Z"/>
+        </g>
+        <g id="mouth-talk" opacity="0">
+          <path fill="#2d082b" d="M612 619 C631 608 679 606 697 618 C712 633 697 669 674 681 C651 693 620 679 610 660 C601 643 600 629 612 619 Z"/>
+          <path fill="#ff9a99" d="M623 665 C640 652 660 655 678 675 C662 685 638 680 623 665 Z"/>
+        </g>
+        <g id="mouth-think" opacity="0">
+          <path d="M634 650 Q651 633 672 642" fill="none" stroke="#2d082b" stroke-width="15" stroke-linecap="round"/>
+        </g>
+      </g>
+    </g>
+    <g id="orbit-front-motion">
+      <g id="orbit-front">
+        <path id="orbit-front-coral" fill="#ff827c" d="M260 523 C179 565 99 626 63 692 C28 754 38 808 83 846 C137 891 240 918 353 925 C449 932 541 918 642 885 L603 822 C499 847 412 854 332 846 C238 837 160 821 131 790 C110 768 126 726 158 686 C186 649 225 614 268 590 Z"/>
+        <path id="orbit-front-teal" fill="url(#teal)" d="M1219 411 C1212 492 1135 574 1014 658 C909 734 794 794 658 839 C560 872 444 899 337 927 C462 935 596 910 715 870 C855 823 984 754 1083 678 C1174 607 1224 535 1220 465 Z"/>
+        <path id="orbit-brush-tip" fill="#ff827c" d="M290 914 L362 917 329 929 399 921 356 936 438 918 397 921 455 901 389 913 421 897 Z"/>
+        <path fill="#ffd1b2" opacity=".55" d="M112 823 C199 860 280 867 365 866 L350 871 C253 874 172 856 112 823 Z"/>
+        <path fill="#2bbdad" opacity=".35" d="M734 843 C873 788 965 732 1051 671 C960 743 851 807 740 853 L679 870 Z"/>
+      </g>
+    </g>
+    <g id="laptop" opacity="0">
+      <path id="laptop-base-edge" fill="#927cbb" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M820 919 L950 849 L1170 960 L1170 978 L1040 1049 L820 937 Z"/>
+      <path id="laptop-base" fill="#e4dbf7" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M820 919 L950 849 L1170 960 L1040 1031 Z"/>
+      <g id="laptop-keys" fill="none" stroke="#a08cbe" stroke-width="9" stroke-linecap="round">
+        <path d="M962 885 L1103 957 M939 899 L1080 971 M916 913 L1057 985"/>
+      </g>
+      <path id="laptop-trackpad" fill="#f8f1ff" stroke="#b4a3cf" stroke-width="6" stroke-linejoin="round" d="M858 919 L888 903 L948 934 L918 950 Z"/>
+      <path id="laptop-lid-edge" fill="#8265b5" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M1066 785 L1189 715 L1201 724 L1180 966 L1040 1031 Z"/>
+      <path id="laptop-screen" fill="#b4a0e2" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M1066 785 L1189 715 L1170 960 L1040 1031 Z"/>
+      <path id="laptop-display" fill="#423151" d="M1080 799 L1171 747 L1155 949 L1059 1002 Z"/>
+      <path id="laptop-lid-shine" fill="#6a527f" d="M1080 799 L1171 747 L1168 782 L1077 834 Z"/>
+      <path id="laptop-doodle" d="M1085 916 C1076 896 1092 868 1105 881 C1118 894 1119 922 1133 901 C1140 891 1140 873 1136 863" fill="none" stroke="#70dfcc" stroke-width="10" stroke-linecap="round"/>
+      <path id="hand-left" fill="#ffedbf" stroke="#2d082b" stroke-width="12" d="M856 864 C871 870 891 885 904 898 C916 910 902 931 887 922 L852 898 C836 888 839 858 856 864 Z"/>
+      <path id="hand-right" fill="#ffedbf" stroke="#2d082b" stroke-width="12" d="M937 849 C952 858 967 875 977 889 C986 904 967 921 954 911 L925 881 C910 866 920 838 937 849 Z"/>
+    </g>
+    <g id="thought-cloud" opacity="0" fill="#fff8e6" stroke="#2d082b" stroke-width="13" stroke-linejoin="round">
+      <path id="cloud-shape" d="M894 182 C864 186 847 166 853 140 C857 120 873 108 894 108 C897 79 927 66 950 81 C970 52 1011 60 1024 91 C1051 77 1080 95 1079 121 C1113 112 1143 137 1134 165 C1149 191 1124 216 1096 210 L903 210 C881 211 873 196 884 182 Z"/>
+      <circle id="cloud-dot-near" cx="855" cy="238" r="13"/>
+      <circle id="cloud-dot-far" cx="825" cy="266" r="7" stroke-width="9"/>
+    </g>
+  </g>
+</svg>

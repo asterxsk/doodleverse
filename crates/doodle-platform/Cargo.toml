@@ -1,0 +1,21 @@
+[package]
+name = "doodle-platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Native file dialogs and platform integration for Doodleverse"
+
+[dependencies]
+doodle-types = { workspace = true }
+rfd = { workspace = true }
+log = { workspace = true }
+raw-window-handle = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_Pointer",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }

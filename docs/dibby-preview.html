@@ -1,0 +1,586 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Dibby — mascot motion</title>
+<style>
+body{margin:0;color:var(--foreground,#292137);font-family:var(--font-sans,system-ui,sans-serif);line-height:1.5}h1{font-size:26px;margin:0 0 4px}p{margin:0;color:var(--muted-foreground,#6e687a)}
+.stage{display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin:16px 0}.hero{width:240px;height:240px;background:#350b35;border-radius:24px;flex:none}.hero svg{width:100%;height:100%;display:block}
+.controls{flex:1;min-width:190px}.buttons{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}button{font:inherit;padding:8px 12px;border:1px solid var(--border,#ded9e5);border-radius:8px;background:var(--card,#f7f4ee);color:var(--foreground,#292137);cursor:pointer}button[aria-pressed=true]{background:var(--primary,#6639a6);color:var(--primary-foreground,#fff)}button:focus-visible,.hero:focus-visible{outline:3px solid #25baac;outline-offset:3px}label{display:block;margin:12px 0;cursor:pointer}
+.gallery{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}figure{margin:0;text-align:center}figcaption{font-size:14px;margin-top:4px}.sample{background:var(--card,#f7f4ee);border-radius:var(--radius,14px);padding:4px}.sample[role=button]{cursor:pointer}.sample:focus-visible{outline:3px solid #25baac;outline-offset:2px}.sample svg{width:100%;height:auto;display:block}.foot{font-size:12px;margin-top:16px}.status{font-weight:600;color:var(--foreground,#292137)}
+@media(max-width:480px){.gallery{grid-template-columns:repeat(2,minmax(0,1fr))}.stage{gap:12px}.hero{width:180px;height:180px}}
+</style>
+<h1>Dibby</h1><p>The drawing buddy, ready for a little conversation.</p>
+<div class="stage"><div class="hero" tabindex="0" aria-label="Hover or focus to make Dibby jump"><svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" role="img" aria-labelledby="hero-dibby-title hero-dibby-desc">
+  <title id="hero-dibby-title" data-part="dibby-title">Dibby</title>
+  <desc id="hero-dibby-desc" data-part="dibby-desc">Doodleverse's friendly cream paper mascot with a folded corner and a coral and teal painted orbit. Editable transparent vector with optional thought-cloud and laptop layers.</desc>
+  <defs>
+    <linearGradient id="hero-paper" data-part="paper" x1="300" y1="280" x2="850" y2="1030" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff4cf"/><stop offset=".65" stop-color="#ffedbf"/><stop offset="1" stop-color="#ffdaa6"/>
+    </linearGradient>
+    <linearGradient id="hero-fold" data-part="fold" x1="810" y1="245" x2="865" y2="382" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff7da"/><stop offset="1" stop-color="#ffe3b0"/>
+    </linearGradient>
+    <linearGradient id="hero-teal" data-part="teal" x1="680" y1="865" x2="1130" y2="400" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#29c9ba"/><stop offset="1" stop-color="#46e2cd"/>
+    </linearGradient>
+  </defs>
+  <g id="hero-float" data-part="float">
+    <g id="hero-orbit-back-motion" data-part="orbit-back-motion">
+      <g id="hero-orbit-back" data-part="orbit-back">
+        <path id="hero-orbit-back-coral" data-part="orbit-back-coral" fill="#ff827c" d="M927 327 C999 294 1094 302 1157 339 L1134 369 C1062 339 1015 362 958 385 Z"/>
+        <path id="hero-orbit-back-teal" data-part="orbit-back-teal" fill="url(#hero-teal)" d="M1114 326 C1179 325 1224 356 1220 413 C1218 465 1175 512 1121 551 L1080 515 C1128 471 1159 435 1154 409 C1148 384 1117 375 1077 370 Z"/>
+        <path fill="#35d3c3" d="M1157 336 L1182 346 1150 342 1166 357 1127 343 1146 346 1121 332 Z"/>
+      </g>
+    </g>
+    <g id="hero-body-rock" data-part="body-rock">
+      <g id="hero-paper-body" data-part="paper-body">
+        <path id="hero-body-outline" data-part="body-outline" fill="url(#hero-paper)" stroke="#2d082b" stroke-width="19" stroke-linejoin="round" d="M761 226 C716 215 689 246 646 268 C585 300 534 316 470 310 C398 299 339 303 295 321 C250 340 226 380 240 433 C254 489 268 549 273 605 C282 661 266 747 273 831 C279 903 267 985 307 1022 C339 1051 381 1028 419 1015 C478 996 537 1021 607 1024 C671 1027 714 1035 771 1020 C844 1006 900 983 944 945 C1003 892 1008 812 989 727 L966 606 C952 537 948 492 951 435 C955 387 950 354 929 322 C890 275 819 227 779 225 Z"/>
+        <path id="hero-paper-bottom-shade" data-part="paper-bottom-shade" fill="#ffd59e" opacity=".43" d="M287 942 C334 983 376 1002 423 983 C476 965 508 978 552 982 C611 988 645 995 695 989 C767 1005 889 977 936 936 C895 983 831 1006 771 1020 C714 1035 671 1027 607 1024 C537 1021 478 996 419 1015 C381 1028 339 1051 307 1022 C289 1005 283 977 287 942 Z"/>
+      </g>
+      <g id="hero-paper-fold" data-part="paper-fold">
+        <path id="hero-fold-shadow" data-part="fold-shadow" fill="#f3be87" opacity=".48" d="M785 265 C813 305 874 359 944 380 L953 416 C895 406 837 395 793 374 Z"/>
+        <path id="hero-fold-face" data-part="fold-face" fill="url(#hero-fold)" stroke="#2d082b" stroke-width="18" stroke-linejoin="round" d="M778 229 C795 265 783 314 780 346 C777 366 786 375 807 372 C855 361 903 360 943 379 C921 319 843 248 778 229 Z"/>
+      </g>
+      <g id="hero-face" data-part="face">
+        <g id="hero-gaze" data-part="gaze">
+          <g id="hero-eyes-motion" data-part="eyes-motion" fill="#2d082b">
+            <path id="hero-eye-left" data-part="eye-left" d="M455 488 C432 475 406 489 389 511 C363 540 350 581 358 609 C362 626 376 638 391 639 C374 624 375 599 382 578 C387 561 394 549 403 541 C402 566 414 589 433 601 C455 616 473 613 482 595 C497 565 479 513 455 488 Z"/>
+            <path id="hero-eye-right" data-part="eye-right" d="M762 439 C736 426 710 440 696 461 C675 486 668 519 677 548 C680 561 688 567 695 570 C685 546 690 521 702 503 C710 490 718 481 727 477 C723 497 730 520 748 533 C771 547 794 545 807 528 C825 504 804 461 782 446 C775 443 769 440 762 439 Z"/>
+          </g>
+        </g>
+        <g id="hero-mouth-smile" data-part="mouth-smile" fill="#2d082b">
+          <path d="M605 631 C624 648 646 652 666 637 C681 628 686 617 690 601 C694 586 709 590 710 603 C714 628 698 650 679 660 C652 678 618 668 602 654 C591 643 594 633 605 631 Z"/>
+        </g>
+        <g id="hero-mouth-talk" data-part="mouth-talk" opacity="0">
+          <path fill="#2d082b" d="M612 619 C631 608 679 606 697 618 C712 633 697 669 674 681 C651 693 620 679 610 660 C601 643 600 629 612 619 Z"/>
+          <path fill="#ff9a99" d="M623 665 C640 652 660 655 678 675 C662 685 638 680 623 665 Z"/>
+        </g>
+        <g id="hero-mouth-think" data-part="mouth-think" opacity="0">
+          <path d="M634 650 Q651 633 672 642" fill="none" stroke="#2d082b" stroke-width="15" stroke-linecap="round"/>
+        </g>
+      </g>
+    </g>
+    <g id="hero-orbit-front-motion" data-part="orbit-front-motion">
+      <g id="hero-orbit-front" data-part="orbit-front">
+        <path id="hero-orbit-front-coral" data-part="orbit-front-coral" fill="#ff827c" d="M260 523 C179 565 99 626 63 692 C28 754 38 808 83 846 C137 891 240 918 353 925 C449 932 541 918 642 885 L603 822 C499 847 412 854 332 846 C238 837 160 821 131 790 C110 768 126 726 158 686 C186 649 225 614 268 590 Z"/>
+        <path id="hero-orbit-front-teal" data-part="orbit-front-teal" fill="url(#hero-teal)" d="M1219 411 C1212 492 1135 574 1014 658 C909 734 794 794 658 839 C560 872 444 899 337 927 C462 935 596 910 715 870 C855 823 984 754 1083 678 C1174 607 1224 535 1220 465 Z"/>
+        <path id="hero-orbit-brush-tip" data-part="orbit-brush-tip" fill="#ff827c" d="M290 914 L362 917 329 929 399 921 356 936 438 918 397 921 455 901 389 913 421 897 Z"/>
+        <path fill="#ffd1b2" opacity=".55" d="M112 823 C199 860 280 867 365 866 L350 871 C253 874 172 856 112 823 Z"/>
+        <path fill="#2bbdad" opacity=".35" d="M734 843 C873 788 965 732 1051 671 C960 743 851 807 740 853 L679 870 Z"/>
+      </g>
+    </g>
+    <g id="hero-laptop" data-part="laptop" opacity="0">
+      <path id="hero-laptop-base-edge" data-part="laptop-base-edge" fill="#927cbb" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M820 919 L950 849 L1170 960 L1170 978 L1040 1049 L820 937 Z"/>
+      <path id="hero-laptop-base" data-part="laptop-base" fill="#e4dbf7" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M820 919 L950 849 L1170 960 L1040 1031 Z"/>
+      <g id="hero-laptop-keys" data-part="laptop-keys" fill="none" stroke="#a08cbe" stroke-width="9" stroke-linecap="round">
+        <path d="M962 885 L1103 957 M939 899 L1080 971 M916 913 L1057 985"/>
+      </g>
+      <path id="hero-laptop-trackpad" data-part="laptop-trackpad" fill="#f8f1ff" stroke="#b4a3cf" stroke-width="6" stroke-linejoin="round" d="M858 919 L888 903 L948 934 L918 950 Z"/>
+      <path id="hero-laptop-lid-edge" data-part="laptop-lid-edge" fill="#8265b5" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M1066 785 L1189 715 L1201 724 L1180 966 L1040 1031 Z"/>
+      <path id="hero-laptop-screen" data-part="laptop-screen" fill="#b4a0e2" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M1066 785 L1189 715 L1170 960 L1040 1031 Z"/>
+      <path id="hero-laptop-display" data-part="laptop-display" fill="#423151" d="M1080 799 L1171 747 L1155 949 L1059 1002 Z"/>
+      <path id="hero-laptop-lid-shine" data-part="laptop-lid-shine" fill="#6a527f" d="M1080 799 L1171 747 L1168 782 L1077 834 Z"/>
+      <path id="hero-laptop-doodle" data-part="laptop-doodle" d="M1085 916 C1076 896 1092 868 1105 881 C1118 894 1119 922 1133 901 C1140 891 1140 873 1136 863" fill="none" stroke="#70dfcc" stroke-width="10" stroke-linecap="round"/>
+      <path id="hero-hand-left" data-part="hand-left" fill="#ffedbf" stroke="#2d082b" stroke-width="12" d="M856 864 C871 870 891 885 904 898 C916 910 902 931 887 922 L852 898 C836 888 839 858 856 864 Z"/>
+      <path id="hero-hand-right" data-part="hand-right" fill="#ffedbf" stroke="#2d082b" stroke-width="12" d="M937 849 C952 858 967 875 977 889 C986 904 967 921 954 911 L925 881 C910 866 920 838 937 849 Z"/>
+    </g>
+    <g id="hero-thought-cloud" data-part="thought-cloud" opacity="0" fill="#fff8e6" stroke="#2d082b" stroke-width="13" stroke-linejoin="round">
+      <path id="hero-cloud-shape" data-part="cloud-shape" d="M894 182 C864 186 847 166 853 140 C857 120 873 108 894 108 C897 79 927 66 950 81 C970 52 1011 60 1024 91 C1051 77 1080 95 1079 121 C1113 112 1143 137 1134 165 C1149 191 1124 216 1096 210 L903 210 C881 211 873 196 884 182 Z"/>
+      <circle id="hero-cloud-dot-near" data-part="cloud-dot-near" cx="855" cy="238" r="13"/>
+      <circle id="hero-cloud-dot-far" data-part="cloud-dot-far" cx="825" cy="266" r="7" stroke-width="9"/>
+    </g>
+  </g>
+</svg>
+</div><div class="controls"><p class="status" id="status" aria-live="polite">Idle</p><div class="buttons"><button type="button" id="busy" aria-pressed="false">Busy cycle</button><button type="button" id="talk" aria-pressed="false">Talking</button><button type="button" id="reset">Reset</button></div><label><input id="reduce" type="checkbox"> Reduce motion</label><p>Idle floats. Hover for a little jump.<br>Busy: thought cloud 3s, laptop 3s.</p></div></div>
+<div class="gallery"><figure><div class="sample" data-state="idle"><svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" role="img" aria-labelledby="preview-idle-dibby-title preview-idle-dibby-desc">
+  <title id="preview-idle-dibby-title" data-part="dibby-title">Dibby</title>
+  <desc id="preview-idle-dibby-desc" data-part="dibby-desc">Doodleverse's friendly cream paper mascot with a folded corner and a coral and teal painted orbit. Editable transparent vector with optional thought-cloud and laptop layers.</desc>
+  <defs>
+    <linearGradient id="preview-idle-paper" data-part="paper" x1="300" y1="280" x2="850" y2="1030" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff4cf"/><stop offset=".65" stop-color="#ffedbf"/><stop offset="1" stop-color="#ffdaa6"/>
+    </linearGradient>
+    <linearGradient id="preview-idle-fold" data-part="fold" x1="810" y1="245" x2="865" y2="382" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff7da"/><stop offset="1" stop-color="#ffe3b0"/>
+    </linearGradient>
+    <linearGradient id="preview-idle-teal" data-part="teal" x1="680" y1="865" x2="1130" y2="400" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#29c9ba"/><stop offset="1" stop-color="#46e2cd"/>
+    </linearGradient>
+  </defs>
+  <g id="preview-idle-float" data-part="float">
+    <g id="preview-idle-orbit-back-motion" data-part="orbit-back-motion">
+      <g id="preview-idle-orbit-back" data-part="orbit-back">
+        <path id="preview-idle-orbit-back-coral" data-part="orbit-back-coral" fill="#ff827c" d="M927 327 C999 294 1094 302 1157 339 L1134 369 C1062 339 1015 362 958 385 Z"/>
+        <path id="preview-idle-orbit-back-teal" data-part="orbit-back-teal" fill="url(#preview-idle-teal)" d="M1114 326 C1179 325 1224 356 1220 413 C1218 465 1175 512 1121 551 L1080 515 C1128 471 1159 435 1154 409 C1148 384 1117 375 1077 370 Z"/>
+        <path fill="#35d3c3" d="M1157 336 L1182 346 1150 342 1166 357 1127 343 1146 346 1121 332 Z"/>
+      </g>
+    </g>
+    <g id="preview-idle-body-rock" data-part="body-rock">
+      <g id="preview-idle-paper-body" data-part="paper-body">
+        <path id="preview-idle-body-outline" data-part="body-outline" fill="url(#preview-idle-paper)" stroke="#2d082b" stroke-width="19" stroke-linejoin="round" d="M761 226 C716 215 689 246 646 268 C585 300 534 316 470 310 C398 299 339 303 295 321 C250 340 226 380 240 433 C254 489 268 549 273 605 C282 661 266 747 273 831 C279 903 267 985 307 1022 C339 1051 381 1028 419 1015 C478 996 537 1021 607 1024 C671 1027 714 1035 771 1020 C844 1006 900 983 944 945 C1003 892 1008 812 989 727 L966 606 C952 537 948 492 951 435 C955 387 950 354 929 322 C890 275 819 227 779 225 Z"/>
+        <path id="preview-idle-paper-bottom-shade" data-part="paper-bottom-shade" fill="#ffd59e" opacity=".43" d="M287 942 C334 983 376 1002 423 983 C476 965 508 978 552 982 C611 988 645 995 695 989 C767 1005 889 977 936 936 C895 983 831 1006 771 1020 C714 1035 671 1027 607 1024 C537 1021 478 996 419 1015 C381 1028 339 1051 307 1022 C289 1005 283 977 287 942 Z"/>
+      </g>
+      <g id="preview-idle-paper-fold" data-part="paper-fold">
+        <path id="preview-idle-fold-shadow" data-part="fold-shadow" fill="#f3be87" opacity=".48" d="M785 265 C813 305 874 359 944 380 L953 416 C895 406 837 395 793 374 Z"/>
+        <path id="preview-idle-fold-face" data-part="fold-face" fill="url(#preview-idle-fold)" stroke="#2d082b" stroke-width="18" stroke-linejoin="round" d="M778 229 C795 265 783 314 780 346 C777 366 786 375 807 372 C855 361 903 360 943 379 C921 319 843 248 778 229 Z"/>
+      </g>
+      <g id="preview-idle-face" data-part="face">
+        <g id="preview-idle-gaze" data-part="gaze">
+          <g id="preview-idle-eyes-motion" data-part="eyes-motion" fill="#2d082b">
+            <path id="preview-idle-eye-left" data-part="eye-left" d="M455 488 C432 475 406 489 389 511 C363 540 350 581 358 609 C362 626 376 638 391 639 C374 624 375 599 382 578 C387 561 394 549 403 541 C402 566 414 589 433 601 C455 616 473 613 482 595 C497 565 479 513 455 488 Z"/>
+            <path id="preview-idle-eye-right" data-part="eye-right" d="M762 439 C736 426 710 440 696 461 C675 486 668 519 677 548 C680 561 688 567 695 570 C685 546 690 521 702 503 C710 490 718 481 727 477 C723 497 730 520 748 533 C771 547 794 545 807 528 C825 504 804 461 782 446 C775 443 769 440 762 439 Z"/>
+          </g>
+        </g>
+        <g id="preview-idle-mouth-smile" data-part="mouth-smile" fill="#2d082b">
+          <path d="M605 631 C624 648 646 652 666 637 C681 628 686 617 690 601 C694 586 709 590 710 603 C714 628 698 650 679 660 C652 678 618 668 602 654 C591 643 594 633 605 631 Z"/>
+        </g>
+        <g id="preview-idle-mouth-talk" data-part="mouth-talk" opacity="0">
+          <path fill="#2d082b" d="M612 619 C631 608 679 606 697 618 C712 633 697 669 674 681 C651 693 620 679 610 660 C601 643 600 629 612 619 Z"/>
+          <path fill="#ff9a99" d="M623 665 C640 652 660 655 678 675 C662 685 638 680 623 665 Z"/>
+        </g>
+        <g id="preview-idle-mouth-think" data-part="mouth-think" opacity="0">
+          <path d="M634 650 Q651 633 672 642" fill="none" stroke="#2d082b" stroke-width="15" stroke-linecap="round"/>
+        </g>
+      </g>
+    </g>
+    <g id="preview-idle-orbit-front-motion" data-part="orbit-front-motion">
+      <g id="preview-idle-orbit-front" data-part="orbit-front">
+        <path id="preview-idle-orbit-front-coral" data-part="orbit-front-coral" fill="#ff827c" d="M260 523 C179 565 99 626 63 692 C28 754 38 808 83 846 C137 891 240 918 353 925 C449 932 541 918 642 885 L603 822 C499 847 412 854 332 846 C238 837 160 821 131 790 C110 768 126 726 158 686 C186 649 225 614 268 590 Z"/>
+        <path id="preview-idle-orbit-front-teal" data-part="orbit-front-teal" fill="url(#preview-idle-teal)" d="M1219 411 C1212 492 1135 574 1014 658 C909 734 794 794 658 839 C560 872 444 899 337 927 C462 935 596 910 715 870 C855 823 984 754 1083 678 C1174 607 1224 535 1220 465 Z"/>
+        <path id="preview-idle-orbit-brush-tip" data-part="orbit-brush-tip" fill="#ff827c" d="M290 914 L362 917 329 929 399 921 356 936 438 918 397 921 455 901 389 913 421 897 Z"/>
+        <path fill="#ffd1b2" opacity=".55" d="M112 823 C199 860 280 867 365 866 L350 871 C253 874 172 856 112 823 Z"/>
+        <path fill="#2bbdad" opacity=".35" d="M734 843 C873 788 965 732 1051 671 C960 743 851 807 740 853 L679 870 Z"/>
+      </g>
+    </g>
+    <g id="preview-idle-laptop" data-part="laptop" opacity="0">
+      <path id="preview-idle-laptop-base-edge" data-part="laptop-base-edge" fill="#927cbb" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M820 919 L950 849 L1170 960 L1170 978 L1040 1049 L820 937 Z"/>
+      <path id="preview-idle-laptop-base" data-part="laptop-base" fill="#e4dbf7" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M820 919 L950 849 L1170 960 L1040 1031 Z"/>
+      <g id="preview-idle-laptop-keys" data-part="laptop-keys" fill="none" stroke="#a08cbe" stroke-width="9" stroke-linecap="round">
+        <path d="M962 885 L1103 957 M939 899 L1080 971 M916 913 L1057 985"/>
+      </g>
+      <path id="preview-idle-laptop-trackpad" data-part="laptop-trackpad" fill="#f8f1ff" stroke="#b4a3cf" stroke-width="6" stroke-linejoin="round" d="M858 919 L888 903 L948 934 L918 950 Z"/>
+      <path id="preview-idle-laptop-lid-edge" data-part="laptop-lid-edge" fill="#8265b5" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M1066 785 L1189 715 L1201 724 L1180 966 L1040 1031 Z"/>
+      <path id="preview-idle-laptop-screen" data-part="laptop-screen" fill="#b4a0e2" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M1066 785 L1189 715 L1170 960 L1040 1031 Z"/>
+      <path id="preview-idle-laptop-display" data-part="laptop-display" fill="#423151" d="M1080 799 L1171 747 L1155 949 L1059 1002 Z"/>
+      <path id="preview-idle-laptop-lid-shine" data-part="laptop-lid-shine" fill="#6a527f" d="M1080 799 L1171 747 L1168 782 L1077 834 Z"/>
+      <path id="preview-idle-laptop-doodle" data-part="laptop-doodle" d="M1085 916 C1076 896 1092 868 1105 881 C1118 894 1119 922 1133 901 C1140 891 1140 873 1136 863" fill="none" stroke="#70dfcc" stroke-width="10" stroke-linecap="round"/>
+      <path id="preview-idle-hand-left" data-part="hand-left" fill="#ffedbf" stroke="#2d082b" stroke-width="12" d="M856 864 C871 870 891 885 904 898 C916 910 902 931 887 922 L852 898 C836 888 839 858 856 864 Z"/>
+      <path id="preview-idle-hand-right" data-part="hand-right" fill="#ffedbf" stroke="#2d082b" stroke-width="12" d="M937 849 C952 858 967 875 977 889 C986 904 967 921 954 911 L925 881 C910 866 920 838 937 849 Z"/>
+    </g>
+    <g id="preview-idle-thought-cloud" data-part="thought-cloud" opacity="0" fill="#fff8e6" stroke="#2d082b" stroke-width="13" stroke-linejoin="round">
+      <path id="preview-idle-cloud-shape" data-part="cloud-shape" d="M894 182 C864 186 847 166 853 140 C857 120 873 108 894 108 C897 79 927 66 950 81 C970 52 1011 60 1024 91 C1051 77 1080 95 1079 121 C1113 112 1143 137 1134 165 C1149 191 1124 216 1096 210 L903 210 C881 211 873 196 884 182 Z"/>
+      <circle id="preview-idle-cloud-dot-near" data-part="cloud-dot-near" cx="855" cy="238" r="13"/>
+      <circle id="preview-idle-cloud-dot-far" data-part="cloud-dot-far" cx="825" cy="266" r="7" stroke-width="9"/>
+    </g>
+  </g>
+</svg>
+</div><figcaption>Idle</figcaption></figure><figure><div class="sample" data-state="hover" tabindex="0" role="button" aria-label="Replay Dibby hover jump"><svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" role="img" aria-labelledby="preview-hover-dibby-title preview-hover-dibby-desc">
+  <title id="preview-hover-dibby-title" data-part="dibby-title">Dibby</title>
+  <desc id="preview-hover-dibby-desc" data-part="dibby-desc">Doodleverse's friendly cream paper mascot with a folded corner and a coral and teal painted orbit. Editable transparent vector with optional thought-cloud and laptop layers.</desc>
+  <defs>
+    <linearGradient id="preview-hover-paper" data-part="paper" x1="300" y1="280" x2="850" y2="1030" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff4cf"/><stop offset=".65" stop-color="#ffedbf"/><stop offset="1" stop-color="#ffdaa6"/>
+    </linearGradient>
+    <linearGradient id="preview-hover-fold" data-part="fold" x1="810" y1="245" x2="865" y2="382" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff7da"/><stop offset="1" stop-color="#ffe3b0"/>
+    </linearGradient>
+    <linearGradient id="preview-hover-teal" data-part="teal" x1="680" y1="865" x2="1130" y2="400" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#29c9ba"/><stop offset="1" stop-color="#46e2cd"/>
+    </linearGradient>
+  </defs>
+  <g id="preview-hover-float" data-part="float">
+    <g id="preview-hover-orbit-back-motion" data-part="orbit-back-motion">
+      <g id="preview-hover-orbit-back" data-part="orbit-back">
+        <path id="preview-hover-orbit-back-coral" data-part="orbit-back-coral" fill="#ff827c" d="M927 327 C999 294 1094 302 1157 339 L1134 369 C1062 339 1015 362 958 385 Z"/>
+        <path id="preview-hover-orbit-back-teal" data-part="orbit-back-teal" fill="url(#preview-hover-teal)" d="M1114 326 C1179 325 1224 356 1220 413 C1218 465 1175 512 1121 551 L1080 515 C1128 471 1159 435 1154 409 C1148 384 1117 375 1077 370 Z"/>
+        <path fill="#35d3c3" d="M1157 336 L1182 346 1150 342 1166 357 1127 343 1146 346 1121 332 Z"/>
+      </g>
+    </g>
+    <g id="preview-hover-body-rock" data-part="body-rock">
+      <g id="preview-hover-paper-body" data-part="paper-body">
+        <path id="preview-hover-body-outline" data-part="body-outline" fill="url(#preview-hover-paper)" stroke="#2d082b" stroke-width="19" stroke-linejoin="round" d="M761 226 C716 215 689 246 646 268 C585 300 534 316 470 310 C398 299 339 303 295 321 C250 340 226 380 240 433 C254 489 268 549 273 605 C282 661 266 747 273 831 C279 903 267 985 307 1022 C339 1051 381 1028 419 1015 C478 996 537 1021 607 1024 C671 1027 714 1035 771 1020 C844 1006 900 983 944 945 C1003 892 1008 812 989 727 L966 606 C952 537 948 492 951 435 C955 387 950 354 929 322 C890 275 819 227 779 225 Z"/>
+        <path id="preview-hover-paper-bottom-shade" data-part="paper-bottom-shade" fill="#ffd59e" opacity=".43" d="M287 942 C334 983 376 1002 423 983 C476 965 508 978 552 982 C611 988 645 995 695 989 C767 1005 889 977 936 936 C895 983 831 1006 771 1020 C714 1035 671 1027 607 1024 C537 1021 478 996 419 1015 C381 1028 339 1051 307 1022 C289 1005 283 977 287 942 Z"/>
+      </g>
+      <g id="preview-hover-paper-fold" data-part="paper-fold">
+        <path id="preview-hover-fold-shadow" data-part="fold-shadow" fill="#f3be87" opacity=".48" d="M785 265 C813 305 874 359 944 380 L953 416 C895 406 837 395 793 374 Z"/>
+        <path id="preview-hover-fold-face" data-part="fold-face" fill="url(#preview-hover-fold)" stroke="#2d082b" stroke-width="18" stroke-linejoin="round" d="M778 229 C795 265 783 314 780 346 C777 366 786 375 807 372 C855 361 903 360 943 379 C921 319 843 248 778 229 Z"/>
+      </g>
+      <g id="preview-hover-face" data-part="face">
+        <g id="preview-hover-gaze" data-part="gaze">
+          <g id="preview-hover-eyes-motion" data-part="eyes-motion" fill="#2d082b">
+            <path id="preview-hover-eye-left" data-part="eye-left" d="M455 488 C432 475 406 489 389 511 C363 540 350 581 358 609 C362 626 376 638 391 639 C374 624 375 599 382 578 C387 561 394 549 403 541 C402 566 414 589 433 601 C455 616 473 613 482 595 C497 565 479 513 455 488 Z"/>
+            <path id="preview-hover-eye-right" data-part="eye-right" d="M762 439 C736 426 710 440 696 461 C675 486 668 519 677 548 C680 561 688 567 695 570 C685 546 690 521 702 503 C710 490 718 481 727 477 C723 497 730 520 748 533 C771 547 794 545 807 528 C825 504 804 461 782 446 C775 443 769 440 762 439 Z"/>
+          </g>
+        </g>
+        <g id="preview-hover-mouth-smile" data-part="mouth-smile" fill="#2d082b">
+          <path d="M605 631 C624 648 646 652 666 637 C681 628 686 617 690 601 C694 586 709 590 710 603 C714 628 698 650 679 660 C652 678 618 668 602 654 C591 643 594 633 605 631 Z"/>
+        </g>
+        <g id="preview-hover-mouth-talk" data-part="mouth-talk" opacity="0">
+          <path fill="#2d082b" d="M612 619 C631 608 679 606 697 618 C712 633 697 669 674 681 C651 693 620 679 610 660 C601 643 600 629 612 619 Z"/>
+          <path fill="#ff9a99" d="M623 665 C640 652 660 655 678 675 C662 685 638 680 623 665 Z"/>
+        </g>
+        <g id="preview-hover-mouth-think" data-part="mouth-think" opacity="0">
+          <path d="M634 650 Q651 633 672 642" fill="none" stroke="#2d082b" stroke-width="15" stroke-linecap="round"/>
+        </g>
+      </g>
+    </g>
+    <g id="preview-hover-orbit-front-motion" data-part="orbit-front-motion">
+      <g id="preview-hover-orbit-front" data-part="orbit-front">
+        <path id="preview-hover-orbit-front-coral" data-part="orbit-front-coral" fill="#ff827c" d="M260 523 C179 565 99 626 63 692 C28 754 38 808 83 846 C137 891 240 918 353 925 C449 932 541 918 642 885 L603 822 C499 847 412 854 332 846 C238 837 160 821 131 790 C110 768 126 726 158 686 C186 649 225 614 268 590 Z"/>
+        <path id="preview-hover-orbit-front-teal" data-part="orbit-front-teal" fill="url(#preview-hover-teal)" d="M1219 411 C1212 492 1135 574 1014 658 C909 734 794 794 658 839 C560 872 444 899 337 927 C462 935 596 910 715 870 C855 823 984 754 1083 678 C1174 607 1224 535 1220 465 Z"/>
+        <path id="preview-hover-orbit-brush-tip" data-part="orbit-brush-tip" fill="#ff827c" d="M290 914 L362 917 329 929 399 921 356 936 438 918 397 921 455 901 389 913 421 897 Z"/>
+        <path fill="#ffd1b2" opacity=".55" d="M112 823 C199 860 280 867 365 866 L350 871 C253 874 172 856 112 823 Z"/>
+        <path fill="#2bbdad" opacity=".35" d="M734 843 C873 788 965 732 1051 671 C960 743 851 807 740 853 L679 870 Z"/>
+      </g>
+    </g>
+    <g id="preview-hover-laptop" data-part="laptop" opacity="0">
+      <path id="preview-hover-laptop-base-edge" data-part="laptop-base-edge" fill="#927cbb" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M820 919 L950 849 L1170 960 L1170 978 L1040 1049 L820 937 Z"/>
+      <path id="preview-hover-laptop-base" data-part="laptop-base" fill="#e4dbf7" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M820 919 L950 849 L1170 960 L1040 1031 Z"/>
+      <g id="preview-hover-laptop-keys" data-part="laptop-keys" fill="none" stroke="#a08cbe" stroke-width="9" stroke-linecap="round">
+        <path d="M962 885 L1103 957 M939 899 L1080 971 M916 913 L1057 985"/>
+      </g>
+      <path id="preview-hover-laptop-trackpad" data-part="laptop-trackpad" fill="#f8f1ff" stroke="#b4a3cf" stroke-width="6" stroke-linejoin="round" d="M858 919 L888 903 L948 934 L918 950 Z"/>
+      <path id="preview-hover-laptop-lid-edge" data-part="laptop-lid-edge" fill="#8265b5" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M1066 785 L1189 715 L1201 724 L1180 966 L1040 1031 Z"/>
+      <path id="preview-hover-laptop-screen" data-part="laptop-screen" fill="#b4a0e2" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M1066 785 L1189 715 L1170 960 L1040 1031 Z"/>
+      <path id="preview-hover-laptop-display" data-part="laptop-display" fill="#423151" d="M1080 799 L1171 747 L1155 949 L1059 1002 Z"/>
+      <path id="preview-hover-laptop-lid-shine" data-part="laptop-lid-shine" fill="#6a527f" d="M1080 799 L1171 747 L1168 782 L1077 834 Z"/>
+      <path id="preview-hover-laptop-doodle" data-part="laptop-doodle" d="M1085 916 C1076 896 1092 868 1105 881 C1118 894 1119 922 1133 901 C1140 891 1140 873 1136 863" fill="none" stroke="#70dfcc" stroke-width="10" stroke-linecap="round"/>
+      <path id="preview-hover-hand-left" data-part="hand-left" fill="#ffedbf" stroke="#2d082b" stroke-width="12" d="M856 864 C871 870 891 885 904 898 C916 910 902 931 887 922 L852 898 C836 888 839 858 856 864 Z"/>
+      <path id="preview-hover-hand-right" data-part="hand-right" fill="#ffedbf" stroke="#2d082b" stroke-width="12" d="M937 849 C952 858 967 875 977 889 C986 904 967 921 954 911 L925 881 C910 866 920 838 937 849 Z"/>
+    </g>
+    <g id="preview-hover-thought-cloud" data-part="thought-cloud" opacity="0" fill="#fff8e6" stroke="#2d082b" stroke-width="13" stroke-linejoin="round">
+      <path id="preview-hover-cloud-shape" data-part="cloud-shape" d="M894 182 C864 186 847 166 853 140 C857 120 873 108 894 108 C897 79 927 66 950 81 C970 52 1011 60 1024 91 C1051 77 1080 95 1079 121 C1113 112 1143 137 1134 165 C1149 191 1124 216 1096 210 L903 210 C881 211 873 196 884 182 Z"/>
+      <circle id="preview-hover-cloud-dot-near" data-part="cloud-dot-near" cx="855" cy="238" r="13"/>
+      <circle id="preview-hover-cloud-dot-far" data-part="cloud-dot-far" cx="825" cy="266" r="7" stroke-width="9"/>
+    </g>
+  </g>
+</svg>
+</div><figcaption>Hover</figcaption></figure><figure><div class="sample" data-state="talking"><svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" role="img" aria-labelledby="preview-talking-dibby-title preview-talking-dibby-desc">
+  <title id="preview-talking-dibby-title" data-part="dibby-title">Dibby</title>
+  <desc id="preview-talking-dibby-desc" data-part="dibby-desc">Doodleverse's friendly cream paper mascot with a folded corner and a coral and teal painted orbit. Editable transparent vector with optional thought-cloud and laptop layers.</desc>
+  <defs>
+    <linearGradient id="preview-talking-paper" data-part="paper" x1="300" y1="280" x2="850" y2="1030" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff4cf"/><stop offset=".65" stop-color="#ffedbf"/><stop offset="1" stop-color="#ffdaa6"/>
+    </linearGradient>
+    <linearGradient id="preview-talking-fold" data-part="fold" x1="810" y1="245" x2="865" y2="382" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff7da"/><stop offset="1" stop-color="#ffe3b0"/>
+    </linearGradient>
+    <linearGradient id="preview-talking-teal" data-part="teal" x1="680" y1="865" x2="1130" y2="400" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#29c9ba"/><stop offset="1" stop-color="#46e2cd"/>
+    </linearGradient>
+  </defs>
+  <g id="preview-talking-float" data-part="float">
+    <g id="preview-talking-orbit-back-motion" data-part="orbit-back-motion">
+      <g id="preview-talking-orbit-back" data-part="orbit-back">
+        <path id="preview-talking-orbit-back-coral" data-part="orbit-back-coral" fill="#ff827c" d="M927 327 C999 294 1094 302 1157 339 L1134 369 C1062 339 1015 362 958 385 Z"/>
+        <path id="preview-talking-orbit-back-teal" data-part="orbit-back-teal" fill="url(#preview-talking-teal)" d="M1114 326 C1179 325 1224 356 1220 413 C1218 465 1175 512 1121 551 L1080 515 C1128 471 1159 435 1154 409 C1148 384 1117 375 1077 370 Z"/>
+        <path fill="#35d3c3" d="M1157 336 L1182 346 1150 342 1166 357 1127 343 1146 346 1121 332 Z"/>
+      </g>
+    </g>
+    <g id="preview-talking-body-rock" data-part="body-rock">
+      <g id="preview-talking-paper-body" data-part="paper-body">
+        <path id="preview-talking-body-outline" data-part="body-outline" fill="url(#preview-talking-paper)" stroke="#2d082b" stroke-width="19" stroke-linejoin="round" d="M761 226 C716 215 689 246 646 268 C585 300 534 316 470 310 C398 299 339 303 295 321 C250 340 226 380 240 433 C254 489 268 549 273 605 C282 661 266 747 273 831 C279 903 267 985 307 1022 C339 1051 381 1028 419 1015 C478 996 537 1021 607 1024 C671 1027 714 1035 771 1020 C844 1006 900 983 944 945 C1003 892 1008 812 989 727 L966 606 C952 537 948 492 951 435 C955 387 950 354 929 322 C890 275 819 227 779 225 Z"/>
+        <path id="preview-talking-paper-bottom-shade" data-part="paper-bottom-shade" fill="#ffd59e" opacity=".43" d="M287 942 C334 983 376 1002 423 983 C476 965 508 978 552 982 C611 988 645 995 695 989 C767 1005 889 977 936 936 C895 983 831 1006 771 1020 C714 1035 671 1027 607 1024 C537 1021 478 996 419 1015 C381 1028 339 1051 307 1022 C289 1005 283 977 287 942 Z"/>
+      </g>
+      <g id="preview-talking-paper-fold" data-part="paper-fold">
+        <path id="preview-talking-fold-shadow" data-part="fold-shadow" fill="#f3be87" opacity=".48" d="M785 265 C813 305 874 359 944 380 L953 416 C895 406 837 395 793 374 Z"/>
+        <path id="preview-talking-fold-face" data-part="fold-face" fill="url(#preview-talking-fold)" stroke="#2d082b" stroke-width="18" stroke-linejoin="round" d="M778 229 C795 265 783 314 780 346 C777 366 786 375 807 372 C855 361 903 360 943 379 C921 319 843 248 778 229 Z"/>
+      </g>
+      <g id="preview-talking-face" data-part="face">
+        <g id="preview-talking-gaze" data-part="gaze">
+          <g id="preview-talking-eyes-motion" data-part="eyes-motion" fill="#2d082b">
+            <path id="preview-talking-eye-left" data-part="eye-left" d="M455 488 C432 475 406 489 389 511 C363 540 350 581 358 609 C362 626 376 638 391 639 C374 624 375 599 382 578 C387 561 394 549 403 541 C402 566 414 589 433 601 C455 616 473 613 482 595 C497 565 479 513 455 488 Z"/>
+            <path id="preview-talking-eye-right" data-part="eye-right" d="M762 439 C736 426 710 440 696 461 C675 486 668 519 677 548 C680 561 688 567 695 570 C685 546 690 521 702 503 C710 490 718 481 727 477 C723 497 730 520 748 533 C771 547 794 545 807 528 C825 504 804 461 782 446 C775 443 769 440 762 439 Z"/>
+          </g>
+        </g>
+        <g id="preview-talking-mouth-smile" data-part="mouth-smile" fill="#2d082b">
+          <path d="M605 631 C624 648 646 652 666 637 C681 628 686 617 690 601 C694 586 709 590 710 603 C714 628 698 650 679 660 C652 678 618 668 602 654 C591 643 594 633 605 631 Z"/>
+        </g>
+        <g id="preview-talking-mouth-talk" data-part="mouth-talk" opacity="0">
+          <path fill="#2d082b" d="M612 619 C631 608 679 606 697 618 C712 633 697 669 674 681 C651 693 620 679 610 660 C601 643 600 629 612 619 Z"/>
+          <path fill="#ff9a99" d="M623 665 C640 652 660 655 678 675 C662 685 638 680 623 665 Z"/>
+        </g>
+        <g id="preview-talking-mouth-think" data-part="mouth-think" opacity="0">
+          <path d="M634 650 Q651 633 672 642" fill="none" stroke="#2d082b" stroke-width="15" stroke-linecap="round"/>
+        </g>
+      </g>
+    </g>
+    <g id="preview-talking-orbit-front-motion" data-part="orbit-front-motion">
+      <g id="preview-talking-orbit-front" data-part="orbit-front">
+        <path id="preview-talking-orbit-front-coral" data-part="orbit-front-coral" fill="#ff827c" d="M260 523 C179 565 99 626 63 692 C28 754 38 808 83 846 C137 891 240 918 353 925 C449 932 541 918 642 885 L603 822 C499 847 412 854 332 846 C238 837 160 821 131 790 C110 768 126 726 158 686 C186 649 225 614 268 590 Z"/>
+        <path id="preview-talking-orbit-front-teal" data-part="orbit-front-teal" fill="url(#preview-talking-teal)" d="M1219 411 C1212 492 1135 574 1014 658 C909 734 794 794 658 839 C560 872 444 899 337 927 C462 935 596 910 715 870 C855 823 984 754 1083 678 C1174 607 1224 535 1220 465 Z"/>
+        <path id="preview-talking-orbit-brush-tip" data-part="orbit-brush-tip" fill="#ff827c" d="M290 914 L362 917 329 929 399 921 356 936 438 918 397 921 455 901 389 913 421 897 Z"/>
+        <path fill="#ffd1b2" opacity=".55" d="M112 823 C199 860 280 867 365 866 L350 871 C253 874 172 856 112 823 Z"/>
+        <path fill="#2bbdad" opacity=".35" d="M734 843 C873 788 965 732 1051 671 C960 743 851 807 740 853 L679 870 Z"/>
+      </g>
+    </g>
+    <g id="preview-talking-laptop" data-part="laptop" opacity="0">
+      <path id="preview-talking-laptop-base-edge" data-part="laptop-base-edge" fill="#927cbb" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M820 919 L950 849 L1170 960 L1170 978 L1040 1049 L820 937 Z"/>
+      <path id="preview-talking-laptop-base" data-part="laptop-base" fill="#e4dbf7" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M820 919 L950 849 L1170 960 L1040 1031 Z"/>
+      <g id="preview-talking-laptop-keys" data-part="laptop-keys" fill="none" stroke="#a08cbe" stroke-width="9" stroke-linecap="round">
+        <path d="M962 885 L1103 957 M939 899 L1080 971 M916 913 L1057 985"/>
+      </g>
+      <path id="preview-talking-laptop-trackpad" data-part="laptop-trackpad" fill="#f8f1ff" stroke="#b4a3cf" stroke-width="6" stroke-linejoin="round" d="M858 919 L888 903 L948 934 L918 950 Z"/>
+      <path id="preview-talking-laptop-lid-edge" data-part="laptop-lid-edge" fill="#8265b5" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M1066 785 L1189 715 L1201 724 L1180 966 L1040 1031 Z"/>
+      <path id="preview-talking-laptop-screen" data-part="laptop-screen" fill="#b4a0e2" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M1066 785 L1189 715 L1170 960 L1040 1031 Z"/>
+      <path id="preview-talking-laptop-display" data-part="laptop-display" fill="#423151" d="M1080 799 L1171 747 L1155 949 L1059 1002 Z"/>
+      <path id="preview-talking-laptop-lid-shine" data-part="laptop-lid-shine" fill="#6a527f" d="M1080 799 L1171 747 L1168 782 L1077 834 Z"/>
+      <path id="preview-talking-laptop-doodle" data-part="laptop-doodle" d="M1085 916 C1076 896 1092 868 1105 881 C1118 894 1119 922 1133 901 C1140 891 1140 873 1136 863" fill="none" stroke="#70dfcc" stroke-width="10" stroke-linecap="round"/>
+      <path id="preview-talking-hand-left" data-part="hand-left" fill="#ffedbf" stroke="#2d082b" stroke-width="12" d="M856 864 C871 870 891 885 904 898 C916 910 902 931 887 922 L852 898 C836 888 839 858 856 864 Z"/>
+      <path id="preview-talking-hand-right" data-part="hand-right" fill="#ffedbf" stroke="#2d082b" stroke-width="12" d="M937 849 C952 858 967 875 977 889 C986 904 967 921 954 911 L925 881 C910 866 920 838 937 849 Z"/>
+    </g>
+    <g id="preview-talking-thought-cloud" data-part="thought-cloud" opacity="0" fill="#fff8e6" stroke="#2d082b" stroke-width="13" stroke-linejoin="round">
+      <path id="preview-talking-cloud-shape" data-part="cloud-shape" d="M894 182 C864 186 847 166 853 140 C857 120 873 108 894 108 C897 79 927 66 950 81 C970 52 1011 60 1024 91 C1051 77 1080 95 1079 121 C1113 112 1143 137 1134 165 C1149 191 1124 216 1096 210 L903 210 C881 211 873 196 884 182 Z"/>
+      <circle id="preview-talking-cloud-dot-near" data-part="cloud-dot-near" cx="855" cy="238" r="13"/>
+      <circle id="preview-talking-cloud-dot-far" data-part="cloud-dot-far" cx="825" cy="266" r="7" stroke-width="9"/>
+    </g>
+  </g>
+</svg>
+</div><figcaption>Talking</figcaption></figure><figure><div class="sample" data-state="thinking"><svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" role="img" aria-labelledby="preview-thinking-dibby-title preview-thinking-dibby-desc">
+  <title id="preview-thinking-dibby-title" data-part="dibby-title">Dibby</title>
+  <desc id="preview-thinking-dibby-desc" data-part="dibby-desc">Doodleverse's friendly cream paper mascot with a folded corner and a coral and teal painted orbit. Editable transparent vector with optional thought-cloud and laptop layers.</desc>
+  <defs>
+    <linearGradient id="preview-thinking-paper" data-part="paper" x1="300" y1="280" x2="850" y2="1030" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff4cf"/><stop offset=".65" stop-color="#ffedbf"/><stop offset="1" stop-color="#ffdaa6"/>
+    </linearGradient>
+    <linearGradient id="preview-thinking-fold" data-part="fold" x1="810" y1="245" x2="865" y2="382" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff7da"/><stop offset="1" stop-color="#ffe3b0"/>
+    </linearGradient>
+    <linearGradient id="preview-thinking-teal" data-part="teal" x1="680" y1="865" x2="1130" y2="400" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#29c9ba"/><stop offset="1" stop-color="#46e2cd"/>
+    </linearGradient>
+  </defs>
+  <g id="preview-thinking-float" data-part="float">
+    <g id="preview-thinking-orbit-back-motion" data-part="orbit-back-motion">
+      <g id="preview-thinking-orbit-back" data-part="orbit-back">
+        <path id="preview-thinking-orbit-back-coral" data-part="orbit-back-coral" fill="#ff827c" d="M927 327 C999 294 1094 302 1157 339 L1134 369 C1062 339 1015 362 958 385 Z"/>
+        <path id="preview-thinking-orbit-back-teal" data-part="orbit-back-teal" fill="url(#preview-thinking-teal)" d="M1114 326 C1179 325 1224 356 1220 413 C1218 465 1175 512 1121 551 L1080 515 C1128 471 1159 435 1154 409 C1148 384 1117 375 1077 370 Z"/>
+        <path fill="#35d3c3" d="M1157 336 L1182 346 1150 342 1166 357 1127 343 1146 346 1121 332 Z"/>
+      </g>
+    </g>
+    <g id="preview-thinking-body-rock" data-part="body-rock">
+      <g id="preview-thinking-paper-body" data-part="paper-body">
+        <path id="preview-thinking-body-outline" data-part="body-outline" fill="url(#preview-thinking-paper)" stroke="#2d082b" stroke-width="19" stroke-linejoin="round" d="M761 226 C716 215 689 246 646 268 C585 300 534 316 470 310 C398 299 339 303 295 321 C250 340 226 380 240 433 C254 489 268 549 273 605 C282 661 266 747 273 831 C279 903 267 985 307 1022 C339 1051 381 1028 419 1015 C478 996 537 1021 607 1024 C671 1027 714 1035 771 1020 C844 1006 900 983 944 945 C1003 892 1008 812 989 727 L966 606 C952 537 948 492 951 435 C955 387 950 354 929 322 C890 275 819 227 779 225 Z"/>
+        <path id="preview-thinking-paper-bottom-shade" data-part="paper-bottom-shade" fill="#ffd59e" opacity=".43" d="M287 942 C334 983 376 1002 423 983 C476 965 508 978 552 982 C611 988 645 995 695 989 C767 1005 889 977 936 936 C895 983 831 1006 771 1020 C714 1035 671 1027 607 1024 C537 1021 478 996 419 1015 C381 1028 339 1051 307 1022 C289 1005 283 977 287 942 Z"/>
+      </g>
+      <g id="preview-thinking-paper-fold" data-part="paper-fold">
+        <path id="preview-thinking-fold-shadow" data-part="fold-shadow" fill="#f3be87" opacity=".48" d="M785 265 C813 305 874 359 944 380 L953 416 C895 406 837 395 793 374 Z"/>
+        <path id="preview-thinking-fold-face" data-part="fold-face" fill="url(#preview-thinking-fold)" stroke="#2d082b" stroke-width="18" stroke-linejoin="round" d="M778 229 C795 265 783 314 780 346 C777 366 786 375 807 372 C855 361 903 360 943 379 C921 319 843 248 778 229 Z"/>
+      </g>
+      <g id="preview-thinking-face" data-part="face">
+        <g id="preview-thinking-gaze" data-part="gaze">
+          <g id="preview-thinking-eyes-motion" data-part="eyes-motion" fill="#2d082b">
+            <path id="preview-thinking-eye-left" data-part="eye-left" d="M455 488 C432 475 406 489 389 511 C363 540 350 581 358 609 C362 626 376 638 391 639 C374 624 375 599 382 578 C387 561 394 549 403 541 C402 566 414 589 433 601 C455 616 473 613 482 595 C497 565 479 513 455 488 Z"/>
+            <path id="preview-thinking-eye-right" data-part="eye-right" d="M762 439 C736 426 710 440 696 461 C675 486 668 519 677 548 C680 561 688 567 695 570 C685 546 690 521 702 503 C710 490 718 481 727 477 C723 497 730 520 748 533 C771 547 794 545 807 528 C825 504 804 461 782 446 C775 443 769 440 762 439 Z"/>
+          </g>
+        </g>
+        <g id="preview-thinking-mouth-smile" data-part="mouth-smile" fill="#2d082b">
+          <path d="M605 631 C624 648 646 652 666 637 C681 628 686 617 690 601 C694 586 709 590 710 603 C714 628 698 650 679 660 C652 678 618 668 602 654 C591 643 594 633 605 631 Z"/>
+        </g>
+        <g id="preview-thinking-mouth-talk" data-part="mouth-talk" opacity="0">
+          <path fill="#2d082b" d="M612 619 C631 608 679 606 697 618 C712 633 697 669 674 681 C651 693 620 679 610 660 C601 643 600 629 612 619 Z"/>
+          <path fill="#ff9a99" d="M623 665 C640 652 660 655 678 675 C662 685 638 680 623 665 Z"/>
+        </g>
+        <g id="preview-thinking-mouth-think" data-part="mouth-think" opacity="0">
+          <path d="M634 650 Q651 633 672 642" fill="none" stroke="#2d082b" stroke-width="15" stroke-linecap="round"/>
+        </g>
+      </g>
+    </g>
+    <g id="preview-thinking-orbit-front-motion" data-part="orbit-front-motion">
+      <g id="preview-thinking-orbit-front" data-part="orbit-front">
+        <path id="preview-thinking-orbit-front-coral" data-part="orbit-front-coral" fill="#ff827c" d="M260 523 C179 565 99 626 63 692 C28 754 38 808 83 846 C137 891 240 918 353 925 C449 932 541 918 642 885 L603 822 C499 847 412 854 332 846 C238 837 160 821 131 790 C110 768 126 726 158 686 C186 649 225 614 268 590 Z"/>
+        <path id="preview-thinking-orbit-front-teal" data-part="orbit-front-teal" fill="url(#preview-thinking-teal)" d="M1219 411 C1212 492 1135 574 1014 658 C909 734 794 794 658 839 C560 872 444 899 337 927 C462 935 596 910 715 870 C855 823 984 754 1083 678 C1174 607 1224 535 1220 465 Z"/>
+        <path id="preview-thinking-orbit-brush-tip" data-part="orbit-brush-tip" fill="#ff827c" d="M290 914 L362 917 329 929 399 921 356 936 438 918 397 921 455 901 389 913 421 897 Z"/>
+        <path fill="#ffd1b2" opacity=".55" d="M112 823 C199 860 280 867 365 866 L350 871 C253 874 172 856 112 823 Z"/>
+        <path fill="#2bbdad" opacity=".35" d="M734 843 C873 788 965 732 1051 671 C960 743 851 807 740 853 L679 870 Z"/>
+      </g>
+    </g>
+    <g id="preview-thinking-laptop" data-part="laptop" opacity="0">
+      <path id="preview-thinking-laptop-base-edge" data-part="laptop-base-edge" fill="#927cbb" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M820 919 L950 849 L1170 960 L1170 978 L1040 1049 L820 937 Z"/>
+      <path id="preview-thinking-laptop-base" data-part="laptop-base" fill="#e4dbf7" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M820 919 L950 849 L1170 960 L1040 1031 Z"/>
+      <g id="preview-thinking-laptop-keys" data-part="laptop-keys" fill="none" stroke="#a08cbe" stroke-width="9" stroke-linecap="round">
+        <path d="M962 885 L1103 957 M939 899 L1080 971 M916 913 L1057 985"/>
+      </g>
+      <path id="preview-thinking-laptop-trackpad" data-part="laptop-trackpad" fill="#f8f1ff" stroke="#b4a3cf" stroke-width="6" stroke-linejoin="round" d="M858 919 L888 903 L948 934 L918 950 Z"/>
+      <path id="preview-thinking-laptop-lid-edge" data-part="laptop-lid-edge" fill="#8265b5" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M1066 785 L1189 715 L1201 724 L1180 966 L1040 1031 Z"/>
+      <path id="preview-thinking-laptop-screen" data-part="laptop-screen" fill="#b4a0e2" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M1066 785 L1189 715 L1170 960 L1040 1031 Z"/>
+      <path id="preview-thinking-laptop-display" data-part="laptop-display" fill="#423151" d="M1080 799 L1171 747 L1155 949 L1059 1002 Z"/>
+      <path id="preview-thinking-laptop-lid-shine" data-part="laptop-lid-shine" fill="#6a527f" d="M1080 799 L1171 747 L1168 782 L1077 834 Z"/>
+      <path id="preview-thinking-laptop-doodle" data-part="laptop-doodle" d="M1085 916 C1076 896 1092 868 1105 881 C1118 894 1119 922 1133 901 C1140 891 1140 873 1136 863" fill="none" stroke="#70dfcc" stroke-width="10" stroke-linecap="round"/>
+      <path id="preview-thinking-hand-left" data-part="hand-left" fill="#ffedbf" stroke="#2d082b" stroke-width="12" d="M856 864 C871 870 891 885 904 898 C916 910 902 931 887 922 L852 898 C836 888 839 858 856 864 Z"/>
+      <path id="preview-thinking-hand-right" data-part="hand-right" fill="#ffedbf" stroke="#2d082b" stroke-width="12" d="M937 849 C952 858 967 875 977 889 C986 904 967 921 954 911 L925 881 C910 866 920 838 937 849 Z"/>
+    </g>
+    <g id="preview-thinking-thought-cloud" data-part="thought-cloud" opacity="0" fill="#fff8e6" stroke="#2d082b" stroke-width="13" stroke-linejoin="round">
+      <path id="preview-thinking-cloud-shape" data-part="cloud-shape" d="M894 182 C864 186 847 166 853 140 C857 120 873 108 894 108 C897 79 927 66 950 81 C970 52 1011 60 1024 91 C1051 77 1080 95 1079 121 C1113 112 1143 137 1134 165 C1149 191 1124 216 1096 210 L903 210 C881 211 873 196 884 182 Z"/>
+      <circle id="preview-thinking-cloud-dot-near" data-part="cloud-dot-near" cx="855" cy="238" r="13"/>
+      <circle id="preview-thinking-cloud-dot-far" data-part="cloud-dot-far" cx="825" cy="266" r="7" stroke-width="9"/>
+    </g>
+  </g>
+</svg>
+</div><figcaption>Thinking</figcaption></figure><figure><div class="sample" data-state="working"><svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" role="img" aria-labelledby="preview-working-dibby-title preview-working-dibby-desc">
+  <title id="preview-working-dibby-title" data-part="dibby-title">Dibby</title>
+  <desc id="preview-working-dibby-desc" data-part="dibby-desc">Doodleverse's friendly cream paper mascot with a folded corner and a coral and teal painted orbit. Editable transparent vector with optional thought-cloud and laptop layers.</desc>
+  <defs>
+    <linearGradient id="preview-working-paper" data-part="paper" x1="300" y1="280" x2="850" y2="1030" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff4cf"/><stop offset=".65" stop-color="#ffedbf"/><stop offset="1" stop-color="#ffdaa6"/>
+    </linearGradient>
+    <linearGradient id="preview-working-fold" data-part="fold" x1="810" y1="245" x2="865" y2="382" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff7da"/><stop offset="1" stop-color="#ffe3b0"/>
+    </linearGradient>
+    <linearGradient id="preview-working-teal" data-part="teal" x1="680" y1="865" x2="1130" y2="400" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#29c9ba"/><stop offset="1" stop-color="#46e2cd"/>
+    </linearGradient>
+  </defs>
+  <g id="preview-working-float" data-part="float">
+    <g id="preview-working-orbit-back-motion" data-part="orbit-back-motion">
+      <g id="preview-working-orbit-back" data-part="orbit-back">
+        <path id="preview-working-orbit-back-coral" data-part="orbit-back-coral" fill="#ff827c" d="M927 327 C999 294 1094 302 1157 339 L1134 369 C1062 339 1015 362 958 385 Z"/>
+        <path id="preview-working-orbit-back-teal" data-part="orbit-back-teal" fill="url(#preview-working-teal)" d="M1114 326 C1179 325 1224 356 1220 413 C1218 465 1175 512 1121 551 L1080 515 C1128 471 1159 435 1154 409 C1148 384 1117 375 1077 370 Z"/>
+        <path fill="#35d3c3" d="M1157 336 L1182 346 1150 342 1166 357 1127 343 1146 346 1121 332 Z"/>
+      </g>
+    </g>
+    <g id="preview-working-body-rock" data-part="body-rock">
+      <g id="preview-working-paper-body" data-part="paper-body">
+        <path id="preview-working-body-outline" data-part="body-outline" fill="url(#preview-working-paper)" stroke="#2d082b" stroke-width="19" stroke-linejoin="round" d="M761 226 C716 215 689 246 646 268 C585 300 534 316 470 310 C398 299 339 303 295 321 C250 340 226 380 240 433 C254 489 268 549 273 605 C282 661 266 747 273 831 C279 903 267 985 307 1022 C339 1051 381 1028 419 1015 C478 996 537 1021 607 1024 C671 1027 714 1035 771 1020 C844 1006 900 983 944 945 C1003 892 1008 812 989 727 L966 606 C952 537 948 492 951 435 C955 387 950 354 929 322 C890 275 819 227 779 225 Z"/>
+        <path id="preview-working-paper-bottom-shade" data-part="paper-bottom-shade" fill="#ffd59e" opacity=".43" d="M287 942 C334 983 376 1002 423 983 C476 965 508 978 552 982 C611 988 645 995 695 989 C767 1005 889 977 936 936 C895 983 831 1006 771 1020 C714 1035 671 1027 607 1024 C537 1021 478 996 419 1015 C381 1028 339 1051 307 1022 C289 1005 283 977 287 942 Z"/>
+      </g>
+      <g id="preview-working-paper-fold" data-part="paper-fold">
+        <path id="preview-working-fold-shadow" data-part="fold-shadow" fill="#f3be87" opacity=".48" d="M785 265 C813 305 874 359 944 380 L953 416 C895 406 837 395 793 374 Z"/>
+        <path id="preview-working-fold-face" data-part="fold-face" fill="url(#preview-working-fold)" stroke="#2d082b" stroke-width="18" stroke-linejoin="round" d="M778 229 C795 265 783 314 780 346 C777 366 786 375 807 372 C855 361 903 360 943 379 C921 319 843 248 778 229 Z"/>
+      </g>
+      <g id="preview-working-face" data-part="face">
+        <g id="preview-working-gaze" data-part="gaze">
+          <g id="preview-working-eyes-motion" data-part="eyes-motion" fill="#2d082b">
+            <path id="preview-working-eye-left" data-part="eye-left" d="M455 488 C432 475 406 489 389 511 C363 540 350 581 358 609 C362 626 376 638 391 639 C374 624 375 599 382 578 C387 561 394 549 403 541 C402 566 414 589 433 601 C455 616 473 613 482 595 C497 565 479 513 455 488 Z"/>
+            <path id="preview-working-eye-right" data-part="eye-right" d="M762 439 C736 426 710 440 696 461 C675 486 668 519 677 548 C680 561 688 567 695 570 C685 546 690 521 702 503 C710 490 718 481 727 477 C723 497 730 520 748 533 C771 547 794 545 807 528 C825 504 804 461 782 446 C775 443 769 440 762 439 Z"/>
+          </g>
+        </g>
+        <g id="preview-working-mouth-smile" data-part="mouth-smile" fill="#2d082b">
+          <path d="M605 631 C624 648 646 652 666 637 C681 628 686 617 690 601 C694 586 709 590 710 603 C714 628 698 650 679 660 C652 678 618 668 602 654 C591 643 594 633 605 631 Z"/>
+        </g>
+        <g id="preview-working-mouth-talk" data-part="mouth-talk" opacity="0">
+          <path fill="#2d082b" d="M612 619 C631 608 679 606 697 618 C712 633 697 669 674 681 C651 693 620 679 610 660 C601 643 600 629 612 619 Z"/>
+          <path fill="#ff9a99" d="M623 665 C640 652 660 655 678 675 C662 685 638 680 623 665 Z"/>
+        </g>
+        <g id="preview-working-mouth-think" data-part="mouth-think" opacity="0">
+          <path d="M634 650 Q651 633 672 642" fill="none" stroke="#2d082b" stroke-width="15" stroke-linecap="round"/>
+        </g>
+      </g>
+    </g>
+    <g id="preview-working-orbit-front-motion" data-part="orbit-front-motion">
+      <g id="preview-working-orbit-front" data-part="orbit-front">
+        <path id="preview-working-orbit-front-coral" data-part="orbit-front-coral" fill="#ff827c" d="M260 523 C179 565 99 626 63 692 C28 754 38 808 83 846 C137 891 240 918 353 925 C449 932 541 918 642 885 L603 822 C499 847 412 854 332 846 C238 837 160 821 131 790 C110 768 126 726 158 686 C186 649 225 614 268 590 Z"/>
+        <path id="preview-working-orbit-front-teal" data-part="orbit-front-teal" fill="url(#preview-working-teal)" d="M1219 411 C1212 492 1135 574 1014 658 C909 734 794 794 658 839 C560 872 444 899 337 927 C462 935 596 910 715 870 C855 823 984 754 1083 678 C1174 607 1224 535 1220 465 Z"/>
+        <path id="preview-working-orbit-brush-tip" data-part="orbit-brush-tip" fill="#ff827c" d="M290 914 L362 917 329 929 399 921 356 936 438 918 397 921 455 901 389 913 421 897 Z"/>
+        <path fill="#ffd1b2" opacity=".55" d="M112 823 C199 860 280 867 365 866 L350 871 C253 874 172 856 112 823 Z"/>
+        <path fill="#2bbdad" opacity=".35" d="M734 843 C873 788 965 732 1051 671 C960 743 851 807 740 853 L679 870 Z"/>
+      </g>
+    </g>
+    <g id="preview-working-laptop" data-part="laptop" opacity="0">
+      <path id="preview-working-laptop-base-edge" data-part="laptop-base-edge" fill="#927cbb" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M820 919 L950 849 L1170 960 L1170 978 L1040 1049 L820 937 Z"/>
+      <path id="preview-working-laptop-base" data-part="laptop-base" fill="#e4dbf7" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M820 919 L950 849 L1170 960 L1040 1031 Z"/>
+      <g id="preview-working-laptop-keys" data-part="laptop-keys" fill="none" stroke="#a08cbe" stroke-width="9" stroke-linecap="round">
+        <path d="M962 885 L1103 957 M939 899 L1080 971 M916 913 L1057 985"/>
+      </g>
+      <path id="preview-working-laptop-trackpad" data-part="laptop-trackpad" fill="#f8f1ff" stroke="#b4a3cf" stroke-width="6" stroke-linejoin="round" d="M858 919 L888 903 L948 934 L918 950 Z"/>
+      <path id="preview-working-laptop-lid-edge" data-part="laptop-lid-edge" fill="#8265b5" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M1066 785 L1189 715 L1201 724 L1180 966 L1040 1031 Z"/>
+      <path id="preview-working-laptop-screen" data-part="laptop-screen" fill="#b4a0e2" stroke="#2d082b" stroke-width="13" stroke-linejoin="round" d="M1066 785 L1189 715 L1170 960 L1040 1031 Z"/>
+      <path id="preview-working-laptop-display" data-part="laptop-display" fill="#423151" d="M1080 799 L1171 747 L1155 949 L1059 1002 Z"/>
+      <path id="preview-working-laptop-lid-shine" data-part="laptop-lid-shine" fill="#6a527f" d="M1080 799 L1171 747 L1168 782 L1077 834 Z"/>
+      <path id="preview-working-laptop-doodle" data-part="laptop-doodle" d="M1085 916 C1076 896 1092 868 1105 881 C1118 894 1119 922 1133 901 C1140 891 1140 873 1136 863" fill="none" stroke="#70dfcc" stroke-width="10" stroke-linecap="round"/>
+      <path id="preview-working-hand-left" data-part="hand-left" fill="#ffedbf" stroke="#2d082b" stroke-width="12" d="M856 864 C871 870 891 885 904 898 C916 910 902 931 887 922 L852 898 C836 888 839 858 856 864 Z"/>
+      <path id="preview-working-hand-right" data-part="hand-right" fill="#ffedbf" stroke="#2d082b" stroke-width="12" d="M937 849 C952 858 967 875 977 889 C986 904 967 921 954 911 L925 881 C910 866 920 838 937 849 Z"/>
+    </g>
+    <g id="preview-working-thought-cloud" data-part="thought-cloud" opacity="0" fill="#fff8e6" stroke="#2d082b" stroke-width="13" stroke-linejoin="round">
+      <path id="preview-working-cloud-shape" data-part="cloud-shape" d="M894 182 C864 186 847 166 853 140 C857 120 873 108 894 108 C897 79 927 66 950 81 C970 52 1011 60 1024 91 C1051 77 1080 95 1079 121 C1113 112 1143 137 1134 165 C1149 191 1124 216 1096 210 L903 210 C881 211 873 196 884 182 Z"/>
+      <circle id="preview-working-cloud-dot-near" data-part="cloud-dot-near" cx="855" cy="238" r="13"/>
+      <circle id="preview-working-cloud-dot-far" data-part="cloud-dot-far" cx="825" cy="266" r="7" stroke-width="9"/>
+    </g>
+  </g>
+</svg>
+</div><figcaption>Working</figcaption></figure></div><p class="foot">Animation preview only. No provider calls. The PNG app icon is preserved unchanged; this is its editable vector companion.</p>
+<script>/* Shared deterministic pose sampler for SVG previews and native atlas generation. */
+(function (root) {
+  'use strict';
+  const durations = { neutral: 0, idle: 2400, hover: 600, talking: 1200, thinking: 3000, working: 3000 };
+  const TAU = Math.PI * 2;
+  function sample(state, elapsedMs, reducedMotion = false) {
+    if (!(state in durations)) throw new Error('Unknown Dibby state: ' + state);
+    const pose = { floatY: 0, bodyRotation: 0, ringRotation: 0, gazeX: 0, gazeY: 0,
+      eyeScaleY: 1, mouthScaleY: 1, smileOpacity: 1, talkOpacity: 0, thinkOpacity: 0,
+      cloudOpacity: 0, cloudY: 0, laptopOpacity: 0, laptopY: 0, laptopRotation: 0 };
+    if (reducedMotion || state === 'neutral') return pose;
+    if (state === 'hover' && elapsedMs >= durations.hover) return pose;
+    const t = state === 'hover' ? Math.max(0, Math.min(1, elapsedMs / durations.hover))
+      : ((elapsedMs % durations[state]) + durations[state]) % durations[state] / durations[state];
+    const wave = Math.sin(TAU * t);
+    if (state === 'idle') {
+      pose.floatY = -12 * (1 - Math.cos(TAU * t));
+      pose.bodyRotation = 1.8 * wave;
+      pose.ringRotation = -2 * wave;
+    } else if (state === 'hover') {
+      pose.floatY = -62 * Math.pow(Math.sin(Math.PI * t), 2);
+      pose.bodyRotation = -2 * wave;
+      pose.ringRotation = 1.2 * wave;
+    } else if (state === 'talking') {
+      pose.floatY = -5 * (1 - Math.cos(TAU * t * 2));
+      pose.bodyRotation = 1.2 * wave;
+      pose.smileOpacity = 0; pose.talkOpacity = 1;
+      pose.mouthScaleY = 0.25 + 0.75 * Math.pow(Math.sin(TAU * t * 3), 2);
+    } else if (state === 'thinking') {
+      pose.floatY = -5 * (1 - Math.cos(TAU * t));
+      pose.bodyRotation = -4 + 1.5 * wave;
+      pose.ringRotation = 2.5 * wave;
+      pose.gazeX = -12; pose.gazeY = -19;
+      pose.smileOpacity = 0; pose.thinkOpacity = 1;
+      pose.cloudOpacity = 1; pose.cloudY = -4 * (1 - Math.cos(TAU * t));
+      const distance = Math.abs(t - 0.65);
+      if (distance < 0.055) pose.eyeScaleY = 1 - 0.92 * (1 + Math.cos(Math.PI * distance / 0.055)) / 2;
+    } else if (state === 'working') {
+      pose.floatY = -7 * (1 - Math.cos(TAU * t * 3));
+      pose.bodyRotation = 2.5 * Math.sin(TAU * t * 3);
+      pose.ringRotation = 4 * Math.sin(TAU * t * 2);
+      pose.gazeX = 18 + 3 * wave; pose.gazeY = 13;
+      pose.laptopOpacity = 1;
+      pose.laptopY = -2 * (1 - Math.cos(TAU * t * 3));
+      pose.laptopRotation = -0.8 * Math.sin(TAU * t * 3);
+    }
+    return pose;
+  }
+  function resolve({ reducedMotion = false, talking = false, hovered = false, hoverElapsedMs = 0, busy = false, busyElapsedMs = 0 } = {}) {
+    if (reducedMotion) return 'neutral';
+    if (talking) return 'talking';
+    if (hovered && hoverElapsedMs < durations.hover) return 'hover';
+    if (busy) return Math.floor(Math.max(0, busyElapsedMs) / 3000) % 2 === 0 ? 'thinking' : 'working';
+    return 'idle';
+  }
+  function apply(svg, pose) {
+    const el = id => svg.querySelector('[data-part="' + id + '"]') || svg.querySelector('[id="' + id + '"]');
+    const fmt = n => Number(n.toFixed(4));
+    el('float').setAttribute('transform', `translate(0 ${fmt(pose.floatY)})`);
+    el('body-rock').setAttribute('transform', `rotate(${fmt(pose.bodyRotation)} 630 640)`);
+    for (const id of ['orbit-back-motion', 'orbit-front-motion'])
+      el(id).setAttribute('transform', `rotate(${fmt(pose.ringRotation)} 630 640)`);
+    el('gaze').setAttribute('transform', `translate(${fmt(pose.gazeX)} ${fmt(pose.gazeY)})`);
+    el('eyes-motion').setAttribute('transform', `translate(600 535) scale(1 ${fmt(pose.eyeScaleY)}) translate(-600 -535)`);
+    el('mouth-talk').setAttribute('transform', `translate(655 645) scale(1 ${fmt(pose.mouthScaleY)}) translate(-655 -645)`);
+    for (const [id, key] of [['mouth-smile', 'smileOpacity'], ['mouth-talk', 'talkOpacity'], ['mouth-think', 'thinkOpacity']])
+      el(id).setAttribute('opacity', pose[key]);
+    el('thought-cloud').setAttribute('opacity', pose.cloudOpacity);
+    el('thought-cloud').setAttribute('transform', `translate(0 ${fmt(pose.cloudY)})`);
+    el('laptop').setAttribute('opacity', pose.laptopOpacity);
+    el('laptop').setAttribute('transform', `translate(0 ${fmt(pose.laptopY)}) rotate(${fmt(pose.laptopRotation)} 1050 990)`);
+  }
+  root.DibbyRig = Object.freeze({ durations: Object.freeze(durations), sample, resolve, apply });
+})(typeof globalThis !== 'undefined' ? globalThis : window);
+
+const hero=document.querySelector('.hero'),svg=hero.querySelector('svg'),busyButton=document.querySelector('#busy'),talkButton=document.querySelector('#talk'),reduce=document.querySelector('#reduce'),status=document.querySelector('#status');
+const preferences=matchMedia('(prefers-reduced-motion: reduce)');
+const flags={talking:false,hovered:false,busy:false};let busyStart=0,hoverStart=0,lastState='',stateStart=performance.now();
+function setButton(button,value){button.setAttribute('aria-pressed',String(value))}
+busyButton.onclick=()=>{flags.busy=!flags.busy;busyStart=performance.now();setButton(busyButton,flags.busy)};
+talkButton.onclick=()=>{flags.talking=!flags.talking;setButton(talkButton,flags.talking)};
+document.querySelector('#reset').onclick=()=>{flags.talking=false;flags.busy=false;busyStart=0;setButton(busyButton,false);setButton(talkButton,false)};
+let pointerInside=false,focused=false;function hover(){const next=pointerInside||focused;if(next&&!flags.hovered)hoverStart=performance.now();flags.hovered=next}
+hero.onpointerenter=()=>{pointerInside=true;hover()};hero.onpointerleave=()=>{pointerInside=false;hover()};hero.onfocus=()=>{focused=true;hover()};hero.onblur=()=>{focused=false;hover()};
+const previews=[...document.querySelectorAll('.sample')];const began=performance.now();
+const jumpPreview=previews.find(p=>p.dataset.state==='hover');function replay(){jumpPreview.dataset.jumpStart=performance.now()}jumpPreview.onpointerenter=replay;jumpPreview.onfocus=replay;jumpPreview.onclick=replay;jumpPreview.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();replay()}};
+function frame(now){const reduced=reduce.checked||preferences.matches;const elapsed=Math.max(0,now-busyStart),hoverElapsed=Math.max(0,now-hoverStart);const state=DibbyRig.resolve({...flags,reducedMotion:reduced,busyElapsedMs:elapsed,hoverElapsedMs:hoverElapsed});if(state!==lastState){stateStart=now;lastState=state}const label=reduced?'Neutral · reduced motion':state[0].toUpperCase()+state.slice(1);if(status.textContent!==label)status.textContent=label;
+const local=(state==='thinking'||state==='working')?elapsed%3000:state==='hover'?hoverElapsed:now-stateStart;DibbyRig.apply(svg,DibbyRig.sample(state,local,reduced));for(const p of previews){const name=p.dataset.state;const time=name==='hover'?(p.dataset.jumpStart?now-Number(p.dataset.jumpStart):600):now-began;DibbyRig.apply(p.querySelector('svg'),DibbyRig.sample(name,time,reduced))}requestAnimationFrame(frame)}requestAnimationFrame(frame);
+</script></html>

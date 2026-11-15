@@ -1,0 +1,13 @@
+[package]
+name = "doodle-ai"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Local AI-card state machine, provider boundary, mock stream, and Dibby motion resolver"
+
+[dependencies]
+doodle-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
