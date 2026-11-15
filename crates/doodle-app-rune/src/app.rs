@@ -111,6 +111,7 @@ pub struct DoodleApp {
     pub closing: bool,
     pub reopen_pending: bool,
     pub menu_open: bool,
+    pub overflow_open: bool,
     pub pin_preview: Option<PinPreview>,
     pub canvas_layout: [f32; 4],
     pub window_size: [f32; 2],
@@ -164,6 +165,7 @@ impl DoodleApp {
             closing: false,
             reopen_pending: false,
             menu_open: false,
+            overflow_open: false,
             pin_preview: None,
             canvas_layout: [0.0, 0.0, 960.0, 640.0],
             window_size: [960.0, 640.0],
@@ -456,6 +458,7 @@ impl DoodleApp {
             self.show_settings = false;
             self.show_help = false;
             self.menu_open = false;
+            self.overflow_open = false;
         }
     }
 
@@ -1128,6 +1131,7 @@ pub fn key_event(state: &mut DoodleApp, ev: &KeyEvent, tx: &mut Tx) -> bool {
             state.show_close_confirm = false;
             state.pin_preview = None;
             state.menu_open = false;
+            state.overflow_open = false;
             true
         }
         Key::Function(1) => {

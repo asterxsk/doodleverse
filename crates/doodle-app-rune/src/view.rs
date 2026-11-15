@@ -24,6 +24,11 @@ fn swatches(light: bool) -> [(&'static str, [u8; 4]); 6] {
     ]
 }
 
+/// Width below which Ask Dibby / Export move into the overflow menu. The centred toolbar is
+/// ~600pt wide and the left island ends ~260pt from the edge, so anything under ~1140 makes the
+/// toolbar card paint over the widened menu island. Expanded only well clear of that point.
+const MENU_BAR_EXPAND_WIDTH: f32 = 1160.0;
+
 const BOARD_PRESETS: [(&str, [u8; 4], [u8; 4], bool); 6] = [
     ("Paper", [250, 248, 243, 255], [174, 168, 158, 255], true),
     ("Snow", [255, 255, 255, 255], [203, 207, 214, 255], true),
@@ -32,6 +37,12 @@ const BOARD_PRESETS: [(&str, [u8; 4], [u8; 4], bool); 6] = [
     ("Slate", [43, 45, 51, 255], [94, 99, 112, 255], false),
     ("Ink", [24, 23, 28, 255], [205, 201, 210, 255], false),
 ];
+
+/// Any press on the chrome dismisses an open popover, matching what the scrim does.
+fn dismiss_popovers(s: &mut DoodleApp) {
+    s.menu_open = false;
+    s.overflow_open = false;
+}
 
 pub fn view(s: &DoodleApp, _cx: &mut Cx<DoodleApp>) -> El {
     let pal = theme::palette(s.light_theme);
@@ -58,23 +69,29 @@ pub fn view(s: &DoodleApp, _cx: &mut Cx<DoodleApp>) -> El {
     }
 
     if s.menu_open {
-        root = root.child(
-            el().absolute(0.0, 0.0)
-                .w_full()
-                .h_full()
-                .on_press(|s: &mut DoodleApp| s.menu_open = false),
-        );
-        root = root.child(menu_popover(&pal));
+        root = root.child(menu_scrim());
+    }
+
+    if s.overflow_open {
+        root = root.child(overflow_scrim());
     }
 
     if s.zen {
         root = root.child(zen_hint(&pal));
     } else {
         root = root.child(menu_island(s, &pal));
-        root = root.child(tool_island(s, &pal));
-        root = root.child(action_island(&pal));
+        root = root.child(toolbar_island(s, &pal));
+        root = root.child(overflow_island(s, &pal));
         root = root.child(status_island(s, &pal));
         root = root.child(zoom_island(s, &pal));
+    }
+
+    // Popovers sit above the islands so a menu opened near one is never clipped by it.
+    if s.menu_open {
+        root = root.child(menu_popover(&pal));
+    }
+    if s.overflow_open {
+        root = root.child(overflow_popover(s, &pal));
     }
 
     if s.show_settings {
@@ -122,24 +139,52 @@ fn island(pal: &Palette) -> El {
 }
 
 fn menu_island(s: &DoodleApp, pal: &Palette) -> El {
-    let mut menu_button = theme::flat_button("menu-toggle", "Doodleverse", pal)
-        .on_press(|s: &mut DoodleApp| s.menu_open = !s.menu_open);
+    let mut menu_button =
+        theme::flat_button("menu-toggle", "Doodleverse", pal).on_press(|s: &mut DoodleApp| {
+            s.overflow_open = false;
+            s.menu_open = !s.menu_open;
+        });
     if s.menu_open {
         menu_button = menu_button.fill(pal.hover);
     }
-    let content = row()
-        .gap(6.0)
-        .items_center()
-        .child(menu_button)
-        .child(
-            theme::flat_button("ask-dibby", "Ask Dibby", pal)
-                .on_press(|s: &mut DoodleApp| s.create_ai_card()),
-        )
-        .child(
-            theme::flat_button("export", "Export", pal)
-                .on_press_tx(|s: &mut DoodleApp, tx| s.export_file(tx)),
-        );
+    let mut content = row().gap(6.0).items_center().child(menu_button);
+    // Narrow windows leave the centred toolbar room to pass between the two corner islands.
+    if s.window_size[0] >= MENU_BAR_EXPAND_WIDTH {
+        content = content
+            .child(theme::flat_button("ask-dibby", "Ask Dibby", pal).on_press(
+                |s: &mut DoodleApp| {
+                    dismiss_popovers(s);
+                    s.create_ai_card();
+                },
+            ))
+            .child(theme::flat_button("export", "Export", pal).on_press_tx(
+                |s: &mut DoodleApp, tx| {
+                    dismiss_popovers(s);
+                    s.export_file(tx);
+                },
+            ));
+    }
     island(pal).absolute(12.0, 10.0).child(content)
+}
+
+fn menu_scrim() -> El {
+    el().absolute(0.0, 0.0)
+        .w_full()
+        .h_full()
+        .on_press(|s: &mut DoodleApp| {
+            s.menu_open = false;
+            s.overflow_open = false;
+        })
+}
+
+fn overflow_scrim() -> El {
+    el().absolute(0.0, 0.0)
+        .w_full()
+        .h_full()
+        .on_press(|s: &mut DoodleApp| {
+            s.menu_open = false;
+            s.overflow_open = false;
+        })
 }
 
 fn menu_popover(pal: &Palette) -> El {
@@ -163,41 +208,25 @@ fn menu_popover(pal: &Palette) -> El {
                 s.menu_open = false;
             }),
     );
-    items = items.child(
-        theme::flat_button("menu-help", "Shortcuts & about", pal)
-            .w_full()
-            .on_press(|s: &mut DoodleApp| {
-                s.show_help = true;
-                s.menu_open = false;
-            }),
-    );
-    items = items.child(theme::divider_h(pal));
-    items = items.child(
-        theme::flat_button("menu-zen", "Hide UI (Alt+Z)", pal)
-            .w_full()
-            .on_press(|s: &mut DoodleApp| {
-                s.toggle_zen();
-                s.menu_open = false;
-            }),
-    );
     island(pal)
-        .absolute(12.0, 56.0)
+        .absolute(12.0, 64.0)
         .w(228.0)
         .padding(9.0)
         .child(items)
 }
 
-fn tool_island(s: &DoodleApp, pal: &Palette) -> El {
-    let mut tools = col().gap(4.0).w_full();
+fn toolbar_island(s: &DoodleApp, pal: &Palette) -> El {
+    let mut bar = row().gap(6.0).items_center();
     for (tool, label) in [
         (Tool::Draw, "Brush"),
         (Tool::Select, "Select"),
         (Tool::Hand, "Hand"),
     ] {
-        tools = tools.child(
+        bar = bar.child(
             theme::active_button(format!("tool-{:?}", tool), label, s.tool == tool, pal)
                 .w(62.0)
                 .on_press(move |s: &mut DoodleApp| {
+                    dismiss_popovers(s);
                     s.tool = tool;
                     if tool != Tool::Draw {
                         s.stroke = None;
@@ -205,33 +234,13 @@ fn tool_island(s: &DoodleApp, pal: &Palette) -> El {
                 }),
         );
     }
-    tools = tools.child(theme::divider_h(pal));
-    let mut swatch_rows = col().gap(4.0);
-    let swatches = swatches(s.light_theme);
-    for pair in swatches.chunks(2) {
-        let mut line = row().gap(4.0);
-        for (name, rgba) in pair {
-            let selected = s.color == *rgba;
-            line = line.child(
-                theme::swatch(format!("swatch-{name}"), *rgba, selected, pal).on_press({
-                    let rgba = *rgba;
-                    move |s: &mut DoodleApp| {
-                        s.color = rgba;
-                        s.tool = Tool::Draw;
-                    }
-                }),
-            );
-        }
-        swatch_rows = swatch_rows.child(line);
-    }
-    tools = tools.child(swatch_rows);
-    tools = tools.child(theme::divider_h(pal));
-    tools = tools.child(
+    bar = bar.child(theme::divider_v(pal));
+    bar = bar.child(
         text(format!("{:.0} px", s.brush.base_width))
             .font(theme::caption())
             .color(pal.muted),
     );
-    tools = tools.child(slider(
+    bar = bar.child(slider(
         pal,
         "brush-size",
         "",
@@ -239,9 +248,27 @@ fn tool_island(s: &DoodleApp, pal: &Palette) -> El {
         s.slider_fraction(Target::BrushSize),
         Target::BrushSize,
     ));
-    tools = tools.child(theme::divider_h(pal));
-    tools = tools.child(history_row(s, pal));
-    island(pal).absolute(12.0, 64.0).w(76.0).child(tools)
+    bar = bar.child(theme::divider_v(pal));
+    let mut colors = row().gap(4.0).items_center();
+    for (name, rgba) in swatches(s.light_theme) {
+        let selected = s.color == rgba;
+        colors = colors.child(
+            theme::swatch(format!("swatch-{name}"), rgba, selected, pal).on_press(
+                move |s: &mut DoodleApp| {
+                    dismiss_popovers(s);
+                    s.color = rgba;
+                    s.tool = Tool::Draw;
+                },
+            ),
+        );
+    }
+    bar = bar.child(colors);
+    bar = bar.child(theme::divider_v(pal));
+    bar = bar.child(history_row(s, pal));
+    el().absolute(0.0, 10.0)
+        .w_full()
+        .justify_center()
+        .child(island(pal).child(bar))
 }
 
 fn history_row(s: &DoodleApp, pal: &Palette) -> El {
@@ -250,38 +277,99 @@ fn history_row(s: &DoodleApp, pal: &Palette) -> El {
     let mut undo = theme::flat_button("undo", "Undo", pal);
     let mut redo = theme::flat_button("redo", "Redo", pal);
     if undo_depth > 0 {
-        undo = undo.on_press(|s: &mut DoodleApp| s.undo());
+        undo = undo.on_press(|s: &mut DoodleApp| {
+            dismiss_popovers(s);
+            s.undo();
+        });
     } else {
         undo = undo.opacity(0.4);
     }
     if redo_depth > 0 {
-        redo = redo.on_press(|s: &mut DoodleApp| s.redo());
+        redo = redo.on_press(|s: &mut DoodleApp| {
+            dismiss_popovers(s);
+            s.redo();
+        });
     } else {
         redo = redo.opacity(0.4);
     }
-    col().gap(4.0).child(undo.w_full()).child(redo.w_full())
+    row().gap(4.0).items_center().child(undo).child(redo)
 }
 
-fn action_island(pal: &Palette) -> El {
-    let mut actions = col().gap(4.0).w(84.0);
+fn overflow_island(s: &DoodleApp, pal: &Palette) -> El {
+    let mut button =
+        theme::flat_button("overflow-toggle", "\u{22EF}", pal).on_press(|s: &mut DoodleApp| {
+            s.menu_open = false;
+            s.overflow_open = !s.overflow_open;
+        });
+    if s.overflow_open {
+        button = button.fill(pal.hover);
+    }
+    island(pal)
+        .pin(None, Some(12.0), Some(10.0), None)
+        .child(button)
+}
+
+fn overflow_popover(s: &DoodleApp, pal: &Palette) -> El {
+    let mut items = col().gap(2.0).w_full();
     for (label, key) in [
         ("Group", "group"),
         ("Ungroup", "ungroup"),
-        ("Fit", "fit"),
-        ("Settings", "settings"),
+        ("Fit to content", "fit"),
     ] {
-        actions = actions.child(theme::button(key, label, pal).w_full().on_press(
-            move |s: &mut DoodleApp| match key {
-                "group" => s.group_selection(),
-                "ungroup" => s.ungroup_selection(),
-                "fit" => s.fit_to_content(),
-                _ => s.show_settings = !s.show_settings,
+        items = items.child(theme::flat_button(key, label, pal).w_full().on_press(
+            move |s: &mut DoodleApp| {
+                match key {
+                    "group" => s.group_selection(),
+                    "ungroup" => s.ungroup_selection(),
+                    _ => s.fit_to_content(),
+                }
+                s.overflow_open = false;
             },
         ));
     }
+    items = items.child(theme::divider_h(pal));
+    items = items.child(
+        theme::flat_button("settings", "Canvas settings", pal)
+            .w_full()
+            .on_press(|s: &mut DoodleApp| {
+                s.show_settings = !s.show_settings;
+                s.overflow_open = false;
+            }),
+    );
+    // Below the expand width Ask Dibby moves here so it stays reachable at every size.
+    if s.window_size[0] < MENU_BAR_EXPAND_WIDTH {
+        items = items.child(
+            theme::flat_button("ask-dibby", "Ask Dibby", pal)
+                .w_full()
+                .on_press(|s: &mut DoodleApp| {
+                    s.overflow_open = false;
+                    s.menu_open = false;
+                    s.create_ai_card();
+                }),
+        );
+    }
+    items = items.child(
+        theme::flat_button("menu-help", "Shortcuts & about", pal)
+            .w_full()
+            .on_press(|s: &mut DoodleApp| {
+                s.show_help = true;
+                s.overflow_open = false;
+            }),
+    );
+    items = items.child(theme::divider_h(pal));
+    items = items.child(
+        theme::flat_button("menu-zen", "Hide UI (Alt+Z)", pal)
+            .w_full()
+            .on_press(|s: &mut DoodleApp| {
+                s.toggle_zen();
+                s.overflow_open = false;
+            }),
+    );
     island(pal)
-        .pin(None, Some(10.0), Some(12.0), None)
-        .child(actions)
+        .pin(None, Some(64.0), Some(10.0), None)
+        .w(200.0)
+        .padding(9.0)
+        .child(items)
 }
 
 fn status_island(s: &DoodleApp, pal: &Palette) -> El {
@@ -323,8 +411,10 @@ fn zoom_island(s: &DoodleApp, pal: &Palette) -> El {
         .gap(6.0)
         .items_center()
         .child(
-            theme::flat_button("zoom-out", "−", pal)
-                .on_press(|s: &mut DoodleApp| s.zoom_from_center(1.0 / 1.2)),
+            theme::flat_button("zoom-out", "−", pal).on_press(|s: &mut DoodleApp| {
+                dismiss_popovers(s);
+                s.zoom_from_center(1.0 / 1.2);
+            }),
         )
         .child(
             text(format!("{:.0}%", s.zoom() * 100.0))
@@ -333,12 +423,16 @@ fn zoom_island(s: &DoodleApp, pal: &Palette) -> El {
                 .w(46.0),
         )
         .child(
-            theme::flat_button("zoom-in", "+", pal)
-                .on_press(|s: &mut DoodleApp| s.zoom_from_center(1.2)),
+            theme::flat_button("zoom-in", "+", pal).on_press(|s: &mut DoodleApp| {
+                dismiss_popovers(s);
+                s.zoom_from_center(1.2);
+            }),
         )
         .child(
-            theme::flat_button("zoom-fit", "Fit", pal)
-                .on_press(|s: &mut DoodleApp| s.fit_to_content()),
+            theme::flat_button("zoom-fit", "Fit", pal).on_press(|s: &mut DoodleApp| {
+                dismiss_popovers(s);
+                s.fit_to_content();
+            }),
         );
     island(pal)
         .pin(None, None, Some(12.0), Some(10.0))

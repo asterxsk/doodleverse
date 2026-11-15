@@ -167,6 +167,10 @@ pub fn divider_h(pal: &Palette) -> El {
     el().w_full().h(1.0).fill(pal.border)
 }
 
+pub fn divider_v(pal: &Palette) -> El {
+    el().w(1.0).h(24.0).fill(pal.border)
+}
+
 pub fn section(title_text: &str, pal: &Palette) -> El {
     text(title_text).font(tok::type_::SECTION).color(pal.muted)
 }
