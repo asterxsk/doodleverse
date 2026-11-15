@@ -1,7 +1,7 @@
 # Verification
 
-Last full gate: 2026-11-15, workspace at the README/docs checkpoint. A check is listed as passed
-only if it ran in this workspace.
+Last full gate: 2026-11-16, workspace with the Rune front end. A check is listed as passed only if
+it ran in this workspace.
 
 ## Automated gate
 
@@ -9,11 +9,12 @@ only if it ran in this workspace.
 | --- | --- |
 | `cargo fmt --all -- --check` | Pass |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Pass |
-| `cargo test --workspace --locked` | 57 passed, 0 failed |
+| `cargo test --workspace --locked` | 69 passed, 0 failed |
 | `cargo build --workspace --release --locked` | Pass |
 
-Test distribution: `doodle-types` 6, `doodle-canvas` 12, `doodle-document` 12, `doodle-files` 8,
-`doodle-ai` 11, `doodle-render` 3, `doodle-platform` 1, `doodle-app` 4.
+Test distribution: `doodle-types` 6, `doodle-canvas` 15, `doodle-document` 16, `doodle-files` 11,
+`doodle-ai` 11, `doodle-render` 5, `doodle-platform` 1, `doodle-app` 4, `doodle-app-rune` 0 (the Rune
+shell is verified through its headless script mode).
 
 What the tests cover:
 
@@ -55,13 +56,59 @@ Run on the native Windows build, window placed on the secondary display through
 The first synthetic-input attempt produced no strokes because the window was not foreground; after
 focusing it, drags and clicks worked. That was a harness issue, not an app bug.
 
+## Rune shell evidence
+
+The Rune front end was driven headlessly with its own script/snapshot mode (`--script`,
+`--snap`), so each scenario below is a real frame of the native app, not a mock. Test scripts
+and images live in the untracked `scratch/` directory; the tracked screenshot is
+`docs/images/rune-window.png`.
+
+| Scenario | Result |
+| --- | --- |
+| Launch, islands, empty-board hint | Verified |
+| Brush strokes with simulated pressure, point/object counters, unsaved state | Verified |
+| Marquee selection, group, selection outlines and corner handles | Verified |
+| Undo then redo through the tool island | Verified; object counts changed 3 → 2 → 2 |
+| Hand-tool drag pan and zoom-in button | Verified; grid origin and zoom badge moved |
+| Wheel pan, `Ctrl`+wheel zoom and pinch magnify handlers | Implemented; wheel pan and button zoom verified |
+| Canvas settings: panel scroll, light/dark, six board presets, grid kinds, all sliders | Verified; wheel over the panel scrolls it to the brush section |
+| Dark board swaps the default ink so new strokes stay readable | Verified |
+| Zen mode closes open panels and hides every island | Verified |
+| AI card: open, type, generate, stream, answer and provider label | Verified |
+| Pin modal and pinning a completed answer | Verified; pin created a statement on the board |
+| Export through the scripted file dialog | Verified; 2398-byte valid `.doodleverse` written |
+| Import through the scripted file dialog, ghost placement, commit | Verified; "Imported 2 objects" |
+| Real window on the secondary monitor, app icon in the title bar | Verified by screenshot |
+| `WM_CLOSE` on a clean board quits the process | Verified |
+| Close with unsaved content asks first, and its Export/Discard/Cancel paths | Implemented and inspected; not clicked through in a real window |
+
+Headless commands used:
+
+```bash
+cargo build -p doodle-app-rune
+./target/debug/doodleverse-rune.exe --size 1180x760 --script scratch/scroll.json --snap scratch/rune-scroll.png
+```
+
+Real-window run on a second monitor (window is hidden only in the console sense; winit still shows
+the app):
+
+```powershell
+$env:DOODLEVERSE_WINDOW_POS = '-1920,0'
+Start-Process target\debug\doodleverse-rune.exe -WindowStyle Hidden
+```
+
+The same binary embeds `assets/app-icon.png` through `rune::set_app_icon`, which restored the
+Windows title-bar, taskbar and Alt-Tab icon that the first Rune builds were missing.
+
+
 ## Known verification gaps
 
 - **Hardware pen pressure** cannot be verified without a tablet. The Windows pointer probe compiles
   and is installed at startup; the fallback path (`None` → simulated pressure) is what the UI
   session exercised. No claim is made that a real pen was tested.
-- **Export/import through the native dialogs** was not automated. Codec, validation, remapping, and
-  atomic write are covered by tests; the dialog wiring is inspected only.
+- **Export/import through the native dialogs of the eframe shell** was not automated. In the Rune
+  shell the same paths were exercised with scripted dialog answers; the real Win32 dialog itself was
+  not clicked through. Codec, validation, remapping, and atomic write are covered by tests.
 - **Pin modal and statement placement** were inspected, not clicked through end to end.
 - **Multi-machine, networking, and WebRTC** do not exist in this build and were not tested.
 - **Real AI providers, ChatGPT sign-in, BYOK, ACP, and the credential vault** do not exist and were
@@ -82,7 +129,9 @@ For a visual smoke test without covering the primary display:
 
 ```powershell
 $env:DOODLE_TEST_WINDOW = "-1920,40,1600,900"
-cargo run --release -p doodle-app
+cargo run --release -p doodle-app          # eframe shell
+$env:DOODLEVERSE_WINDOW_POS = '-1920,0'
+cargo run -p doodle-app-rune               # Rune shell
 ```
 
 Close the app before rebuilding; the running executable locks the release binary on Windows.

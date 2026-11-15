@@ -1,0 +1,26 @@
+[package]
+name = "doodle-app-rune"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Doodleverse native application on Rune"
+
+[[bin]]
+name = "doodleverse-rune"
+path = "src/main.rs"
+
+[dependencies]
+doodle-types = { workspace = true }
+doodle-canvas = { workspace = true }
+doodle-document = { workspace = true }
+doodle-render = { workspace = true }
+doodle-files = { workspace = true }
+doodle-ai = { workspace = true }
+doodle-platform = { workspace = true }
+rune = { workspace = true, features = ["native-file-dialog"] }
+image = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+raw-window-handle = { workspace = true }

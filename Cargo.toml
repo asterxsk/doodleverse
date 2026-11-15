@@ -9,6 +9,7 @@ members = [
     "crates/doodle-ai",
     "crates/doodle-platform",
     "crates/doodle-app",
+    "crates/doodle-app-rune",
 ]
 
 [workspace.package]
@@ -43,6 +44,16 @@ log = "0.4.28"
 env_logger = "0.11.8"
 raw-window-handle = "0.6.2"
 windows-sys = { version = "0.61.2", default-features = false }
+rune = { git = "https://github.com/anomalyco/rune", rev = "958743308f36fdf1c568c513badc96ddb0c7f040" }
+
+# Rune's patched renderer/text/accessibility crates. Cargo does not inherit a dependency's
+# [patch.crates-io]; every app that builds Rune must repeat these at the same revision.
+[patch.crates-io]
+winit = { git = "https://github.com/anomalyco/rune", rev = "958743308f36fdf1c568c513badc96ddb0c7f040" }
+parley_engine = { git = "https://github.com/anomalyco/rune", rev = "958743308f36fdf1c568c513badc96ddb0c7f040" }
+wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "958743308f36fdf1c568c513badc96ddb0c7f040" }
+accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "958743308f36fdf1c568c513badc96ddb0c7f040" }
+accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "958743308f36fdf1c568c513badc96ddb0c7f040" }
 
 [profile.dev]
 opt-level = 1

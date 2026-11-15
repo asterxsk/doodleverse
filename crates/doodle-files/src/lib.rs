@@ -10,8 +10,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use doodle_types::{
-    BoardSnapshot, ENVELOPE_VERSION, MAX_IMPORT_BYTES, MAX_OBJECTS, MAX_STROKE_POINTS, ObjectId,
-    ObjectKind, Pose, Rect, StoredObject,
+    BoardSnapshot, ENVELOPE_VERSION, MAX_IMPORT_BYTES, MAX_OBJECTS, MAX_TOTAL_STROKE_POINTS,
+    ObjectId, ObjectKind, Pose, Rect, StoredObject,
 };
 use thiserror::Error;
 
@@ -113,7 +113,7 @@ pub fn encode(snapshot: &BoardSnapshot) -> Result<Vec<u8>, FileError> {
             _ => None,
         })
         .sum();
-    if total_points > MAX_STROKE_POINTS * 8 {
+    if total_points > MAX_TOTAL_STROKE_POINTS {
         return Err(FileError::TooMuchGeometry);
     }
     let payload = postcard::to_allocvec(snapshot).map_err(|_| FileError::InvalidBoard)?;
@@ -167,14 +167,17 @@ pub fn decode_and_validate(bytes: &[u8]) -> Result<ImportPayload, FileError> {
     let payload = bytes
         .get(HEADER_LEN..HEADER_LEN + payload_len)
         .ok_or(FileError::Truncated)?;
-    if payload.len() != payload_len {
-        return Err(FileError::Truncated);
+    if payload.len() != payload_len || bytes.len() != HEADER_LEN + payload_len {
+        return Err(FileError::Corrupt);
     }
     if crc32fast::hash(payload) != checksum {
         return Err(FileError::Corrupt);
     }
-    let snapshot: BoardSnapshot =
-        postcard::from_bytes(payload).map_err(|_| FileError::InvalidBoard)?;
+    let (snapshot, remainder): (BoardSnapshot, &[u8]) =
+        postcard::take_from_bytes(payload).map_err(|_| FileError::InvalidBoard)?;
+    if !remainder.is_empty() {
+        return Err(FileError::Corrupt);
+    }
     if snapshot.schema_version != schema_version {
         return Err(FileError::UnsupportedSchema(schema_version));
     }
@@ -188,6 +191,17 @@ pub fn decode_and_validate(bytes: &[u8]) -> Result<ImportPayload, FileError> {
 fn build_payload(snapshot: BoardSnapshot) -> Result<ImportPayload, FileError> {
     if snapshot.objects.is_empty() {
         return Err(FileError::Empty);
+    }
+    let total_points: usize = snapshot
+        .objects
+        .iter()
+        .filter_map(|object| match &object.kind {
+            ObjectKind::Stroke(stroke) => Some(stroke.geometry.points.len()),
+            _ => None,
+        })
+        .sum();
+    if total_points > MAX_TOTAL_STROKE_POINTS {
+        return Err(FileError::TooMuchGeometry);
     }
     let mut remap: HashMap<ObjectId, ObjectId> = HashMap::with_capacity(snapshot.objects.len());
     for object in &snapshot.objects {
@@ -205,15 +219,10 @@ fn build_payload(snapshot: BoardSnapshot) -> Result<ImportPayload, FileError> {
         }
         let mut cloned = object.clone();
         cloned.id = new_id;
-        cloned.parent = object
-            .parent
-            .and_then(|parent| remap.get(&parent).copied())
-            .filter(|parent| {
-                snapshot
-                    .objects
-                    .iter()
-                    .any(|candidate| candidate.id == *parent)
-            });
+        cloned.parent = match object.parent {
+            Some(parent) => Some(remap.get(&parent).copied().ok_or(FileError::InvalidBoard)?),
+            None => None,
+        };
         if let Some(object_bounds) = cloned.bounds() {
             bounds = Some(bounds.map_or(object_bounds, |current| current.union(object_bounds)));
         }
@@ -233,14 +242,19 @@ fn build_payload(snapshot: BoardSnapshot) -> Result<ImportPayload, FileError> {
         }
     }
     let bounds = bounds.ok_or(FileError::Empty)?;
-    let dx = -bounds.min_x;
-    let dy = -bounds.min_y;
+    let (dx, dy) = normalization_offset(&objects, bounds).ok_or(FileError::InvalidBoard)?;
     for object in &mut objects {
         object.pose = Pose::new(object.pose.x + dx, object.pose.y + dy);
         if !object.pose.is_finite() {
             return Err(FileError::InvalidBoard);
         }
     }
+    let bounds = Rect::new(
+        bounds.min_x + dx,
+        bounds.min_y + dy,
+        bounds.max_x + dx,
+        bounds.max_y + dy,
+    );
     let root_ids = objects
         .iter()
         .filter(|object| object.parent.is_none())
@@ -254,9 +268,28 @@ fn build_payload(snapshot: BoardSnapshot) -> Result<ImportPayload, FileError> {
     })
 }
 
+/// Keeps the usual origin placement when it fits the coordinate budget, and centers the board
+/// instead for content spanning most of the valid world. Returns `None` when even centering
+/// cannot keep every pose inside the documented limit.
+fn normalization_offset(objects: &[StoredObject], bounds: Rect) -> Option<(f64, f64)> {
+    let candidates = [
+        (-bounds.min_x, -bounds.min_y),
+        (-bounds.center().x, -bounds.center().y),
+        (0.0, 0.0),
+    ];
+    candidates.into_iter().find(|(dx, dy)| {
+        objects
+            .iter()
+            .all(|object| Pose::new(object.pose.x + dx, object.pose.y + dy).is_finite())
+    })
+}
+
 /// Writes bytes to a sibling temporary file, then replaces `path`.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), FileError> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     if !parent.exists() {
         return Err(FileError::Io("destination folder does not exist".into()));
     }
@@ -443,6 +476,73 @@ mod tests {
                 .count(),
             payload.root_ids.len()
         );
+    }
+
+    #[test]
+    fn import_preserves_nested_group_relationships() {
+        let root = StoredObject {
+            id: ObjectId::new(),
+            parent: None,
+            order_key: 0,
+            pose: Pose::default(),
+            kind: ObjectKind::Group,
+        };
+        let child = StoredObject {
+            id: ObjectId::new(),
+            parent: Some(root.id),
+            order_key: 16,
+            pose: Pose::default(),
+            kind: ObjectKind::Group,
+        };
+        let mut leaf = stroke(10.0);
+        leaf.parent = Some(child.id);
+        let bytes = encode(&BoardSnapshot::new(vec![root, child, leaf])).expect("encode");
+        let payload = decode_and_validate(&bytes).expect("decode");
+        assert_eq!(payload.root_ids.len(), 1);
+        let groups: Vec<_> = payload
+            .objects
+            .iter()
+            .filter(|object| object.kind.is_group())
+            .collect();
+        assert_eq!(groups.len(), 2);
+        let root_id = groups
+            .iter()
+            .find(|object| object.parent.is_none())
+            .map(|object| object.id)
+            .expect("root group");
+        let child_group = groups
+            .iter()
+            .find(|object| object.parent == Some(root_id))
+            .expect("child group keeps its parent");
+        let leaf = payload
+            .objects
+            .iter()
+            .find(|object| !object.kind.is_group())
+            .expect("leaf");
+        assert_eq!(leaf.parent, Some(child_group.id));
+    }
+
+    #[test]
+    fn trailing_bytes_are_rejected() {
+        let bytes = encode(&BoardSnapshot::new(vec![stroke(0.0)])).expect("encode");
+        let mut extended = bytes;
+        extended.extend_from_slice(&[0u8; 32]);
+        assert!(matches!(
+            decode_and_validate(&extended),
+            Err(FileError::Corrupt)
+        ));
+    }
+
+    #[test]
+    fn extreme_span_normalizes_without_losing_validity() {
+        let mut left = stroke(0.0);
+        left.pose = Pose::new(-doodle_types::MAX_ABS_COORDINATE, 0.0);
+        let mut right = stroke(0.0);
+        right.pose = Pose::new(doodle_types::MAX_ABS_COORDINATE, 0.0);
+        let bytes = encode(&BoardSnapshot::new(vec![left, right])).expect("encode");
+        let payload = decode_and_validate(&bytes).expect("decode");
+        assert!(payload.objects.iter().all(|object| object.pose.is_finite()));
+        assert!(payload.bounds.width() > 1.0e9);
     }
 
     #[test]

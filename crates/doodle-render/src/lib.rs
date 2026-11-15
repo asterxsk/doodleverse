@@ -116,47 +116,70 @@ pub fn grid_frame(camera: &Camera, viewport: Rect, settings: GridSettings) -> Gr
         screen_spacing = spacing * camera.zoom;
         guard += 1;
     }
-    frame.effective_spacing = spacing;
     let max_points = 18_000usize;
     let max_lines = 400usize;
 
-    let start_x = (viewport.min_x / screen_spacing).ceil() * screen_spacing;
-    let start_y = (viewport.min_y / screen_spacing).ceil() * screen_spacing;
-    let columns = ((viewport.max_x - start_x) / screen_spacing).floor() as i64;
-    let rows = ((viewport.max_y - start_y) / screen_spacing).floor() as i64;
-    if columns < 0 || rows < 0 {
-        return frame;
+    // The grid lives in world space. Adapt its spacing until the visible cell count fits the
+    // budget; this keeps the whole viewport covered instead of silently dropping the far edge.
+    let mut visible_world = camera.visible_world(viewport);
+    loop {
+        let columns = ((visible_world.width() / spacing).ceil() as usize).saturating_add(1);
+        let rows = ((visible_world.height() / spacing).ceil() as usize).saturating_add(1);
+        let over_budget = if settings.kind == GridKind::Lines {
+            columns.max(rows) > max_lines
+        } else {
+            columns.saturating_mul(rows) > max_points
+        };
+        if !over_budget || guard >= 96 {
+            break;
+        }
+        spacing *= 2.0;
+        guard += 1;
     }
+    frame.effective_spacing = spacing;
+    visible_world = camera.visible_world(viewport);
+    let start_x = (visible_world.min_x / spacing).ceil() * spacing;
+    let start_y = (visible_world.min_y / spacing).ceil() * spacing;
+    let columns = ((visible_world.max_x - start_x) / spacing).floor().max(0.0) as usize;
+    let rows = ((visible_world.max_y - start_y) / spacing).floor().max(0.0) as usize;
+    let to_screen_x = |world_x: f64| -> f32 {
+        camera
+            .world_to_screen(doodle_types::Point::new(world_x, 0.0), viewport)
+            .x as f32
+    };
+    let to_screen_y = |world_y: f64| -> f32 {
+        camera
+            .world_to_screen(doodle_types::Point::new(0.0, world_y), viewport)
+            .y as f32
+    };
     if settings.kind == GridKind::Lines {
-        for column in 0..=columns.min(max_lines as i64) {
+        for column in 0..=columns.min(max_lines) {
             frame
                 .vertical_lines
-                .push((start_x + column as f64 * screen_spacing) as f32);
+                .push(to_screen_x(start_x + column as f64 * spacing));
         }
-        for row in 0..=rows.min(max_lines as i64) {
+        for row in 0..=rows.min(max_lines) {
             frame
                 .horizontal_lines
-                .push((start_y + row as f64 * screen_spacing) as f32);
+                .push(to_screen_y(start_y + row as f64 * spacing));
         }
         return frame;
     }
 
-    let mut count = 0usize;
     for row in 0..=rows {
         for column in 0..=columns {
-            if count >= max_points {
+            if frame.dots.len() + frame.pluses.len() >= max_points {
                 return frame;
             }
             let point = [
-                (start_x + column as f64 * screen_spacing) as f32,
-                (start_y + row as f64 * screen_spacing) as f32,
+                to_screen_x(start_x + column as f64 * spacing),
+                to_screen_y(start_y + row as f64 * spacing),
             ];
             if settings.kind == GridKind::Dots {
                 frame.dots.push(point);
             } else {
                 frame.pluses.push(point);
             }
-            count += 1;
         }
     }
     frame
@@ -219,7 +242,18 @@ impl SceneRenderer {
             let Some(bounds) = projected.bounds else {
                 continue;
             };
-            if !bounds.intersects_rect(visible) {
+            let offset = offsets
+                .get(&projected.object.id)
+                .or_else(|| offsets.get(&projected.top_id))
+                .copied()
+                .unwrap_or((0.0, 0.0));
+            let preview_bounds = Rect::new(
+                bounds.min_x + offset.0,
+                bounds.min_y + offset.1,
+                bounds.max_x + offset.0,
+                bounds.max_y + offset.1,
+            );
+            if !preview_bounds.intersects_rect(visible) {
                 continue;
             }
             let ObjectKind::Stroke(stroke) = &projected.object.kind else {
@@ -239,11 +273,6 @@ impl SceneRenderer {
                 entry.hash = hash;
                 entry.local = build_local_mesh(&stroke.geometry, stroke.style);
             }
-            let offset = offsets
-                .get(&projected.object.id)
-                .or_else(|| offsets.get(&projected.top_id))
-                .copied()
-                .unwrap_or((0.0, 0.0));
             let pose = doodle_types::Pose::new(
                 projected.object.pose.x + offset.0,
                 projected.object.pose.y + offset.1,
@@ -356,19 +385,26 @@ mod tests {
             })
             .collect();
         // Build a projection through the document would add a docs dependency; assemble directly.
+        let objects: Vec<doodle_document::ProjectedObject> = objects
+            .into_iter()
+            .map(|object| doodle_document::ProjectedObject {
+                bounds: object.bounds(),
+                parent: None,
+                depth: 0,
+                top_id: object.id,
+                object,
+            })
+            .collect();
+        let index = objects
+            .iter()
+            .enumerate()
+            .map(|(index, object)| (object.object.id, index))
+            .collect();
         BoardProjection {
-            objects: objects
-                .into_iter()
-                .map(|object| doodle_document::ProjectedObject {
-                    bounds: object.bounds(),
-                    parent: None,
-                    depth: 0,
-                    top_id: object.id,
-                    object,
-                })
-                .collect(),
+            objects,
             revision: 1,
             total_stroke_points: strokes.len() * 2,
+            index,
         }
     }
 
@@ -403,6 +439,42 @@ mod tests {
         );
         assert!(frame.dots.len() <= 18_000);
         assert!(frame.effective_spacing * camera.zoom <= 320.0);
+    }
+
+    #[test]
+    fn grid_pans_with_the_camera() {
+        let viewport = Rect::new(0.0, 0.0, 800.0, 600.0);
+        let frame = grid_frame(
+            &Camera::new(doodle_types::Point::new(100.0, 0.0), 1.0),
+            viewport,
+            GridSettings::default(),
+        );
+        // The world origin sits at screen (300, 300) and must be a grid point.
+        assert!(
+            frame
+                .dots
+                .iter()
+                .any(|dot| (dot[0] - 300.0).abs() < 0.01 && (dot[1] - 300.0).abs() < 0.01),
+            "grid follows the world origin after panning"
+        );
+        let centered = grid_frame(&Camera::default(), viewport, GridSettings::default());
+        assert_ne!(frame.dots, centered.dots);
+    }
+
+    #[test]
+    fn grid_adapts_spacing_instead_of_dropping_the_far_edge() {
+        let viewport = Rect::new(0.0, 0.0, 5120.0, 1080.0);
+        let frame = grid_frame(
+            &Camera::new(doodle_types::Point::default(), 0.25),
+            viewport,
+            GridSettings::default(),
+        );
+        assert!(frame.dots.len() <= 18_000);
+        let max_x = frame.dots.iter().map(|dot| dot[0]).fold(f32::MIN, f32::max);
+        assert!(
+            max_x > viewport.max_x as f32 - 40.0,
+            "grid should reach the right edge, got {max_x}"
+        );
     }
 
     #[test]

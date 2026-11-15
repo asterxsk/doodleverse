@@ -13,11 +13,11 @@ mod imp {
     use raw_window_handle::{RawWindowHandle, WindowHandle};
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows_sys::Win32::UI::Input::Pointer::{
-        GetPointerPenInfo, GetPointerType, POINTER_PEN_INFO,
+        GetPointerPenInfo, GetPointerType, POINTER_FLAG_INCONTACT, POINTER_PEN_INFO,
     };
     use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        PT_PEN, WM_POINTERDOWN, WM_POINTERLEAVE, WM_POINTERUP, WM_POINTERUPDATE,
+        PEN_MASK_PRESSURE, PT_PEN, WM_POINTERDOWN, WM_POINTERLEAVE, WM_POINTERUP, WM_POINTERUPDATE,
     };
 
     /// Pressure in permille (0—1000) of the last pen sample.
@@ -56,9 +56,19 @@ mod imp {
                     // SAFETY: the same pointer id was just confirmed to be a pen.
                     if unsafe { GetPointerPenInfo(pointer_id, &mut info) } != 0 {
                         SEEN.store(true, Ordering::Relaxed);
-                        ACTIVE.store(true, Ordering::Relaxed);
-                        let pressure = info.pressure.min(1024) * 1000 / 1024;
-                        PRESSURE.store(pressure, Ordering::Relaxed);
+                        let in_contact =
+                            info.pointerInfo.pointerFlags & POINTER_FLAG_INCONTACT != 0;
+                        let has_pressure = info.penMask & PEN_MASK_PRESSURE != 0;
+                        if in_contact && has_pressure {
+                            ACTIVE.store(true, Ordering::Relaxed);
+                            let pressure = info.pressure.min(1024) * 1000 / 1024;
+                            PRESSURE.store(pressure, Ordering::Relaxed);
+                        } else {
+                            // A hovering pen, or one that reports no pressure field, must not
+                            // masquerade as a pressure-0 contact and disable mouse simulation.
+                            ACTIVE.store(false, Ordering::Relaxed);
+                            PRESSURE.store(0, Ordering::Relaxed);
+                        }
                     }
                 }
             }

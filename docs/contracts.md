@@ -130,10 +130,17 @@ The UI must not depend on CRDT iteration order, map keys, or internal yrs types.
 - Zoom is clamped to `MIN_ZOOM..=MAX_ZOOM` (0.02..=64) and anchored at the cursor.
 - Grid settings are sanitized before rendering; custom board/grid colors are allowed.
 - Theme, grid, and brush settings are session-only.
+- Default ink follows the board: flipping to a dark board swaps the untouched default ink from
+  dark to light (and back); a color the user chose is never rewritten.
+- Both app shells (`doodle-app`, `doodle-app-rune`) share these rules; appearance never crosses
+  into the document.
 
 ## 9. Input
 
-- `B`/`V` switch brush/select; `Alt+Z` toggles zen mode; `Esc` cancels the active interaction.
+- `B`/`V`/`H` switch brush/select/hand; `Alt+Z` toggles zen mode; `Esc` cancels the active
+  interaction. Entering zen closes open panels so no island or modal is left floating.
+- The Rune shell pans on the wheel and zooms on `Ctrl`/`Cmd`+wheel or pinch; the settings panel
+  keeps the wheel while the pointer is over it, so the board never pans underneath.
 - Text input owns the keyboard while a text field is focused; global shortcuts must not fire then.
 - Pen pressure is `Option<f32>` in `0.0..=1.0`. `None` means "no pressure source" and selects the
   simulated mouse envelope. A hardware source must not report a constant fake value.

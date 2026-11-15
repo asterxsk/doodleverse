@@ -31,10 +31,26 @@ impl BrushSettings {
             } else {
                 4.0
             },
-            pressure_sensitivity: self.pressure_sensitivity.clamp(0.0, 1.0),
-            smoothing: self.smoothing.clamp(0.0, 1.0),
-            taper_start: self.taper_start.clamp(0.0, 0.45),
-            taper_end: self.taper_end.clamp(0.0, 0.45),
+            pressure_sensitivity: if self.pressure_sensitivity.is_finite() {
+                self.pressure_sensitivity.clamp(0.0, 1.0)
+            } else {
+                0.65
+            },
+            smoothing: if self.smoothing.is_finite() {
+                self.smoothing.clamp(0.0, 1.0)
+            } else {
+                0.35
+            },
+            taper_start: if self.taper_start.is_finite() {
+                self.taper_start.clamp(0.0, 0.45)
+            } else {
+                0.08
+            },
+            taper_end: if self.taper_end.is_finite() {
+                self.taper_end.clamp(0.0, 0.45)
+            } else {
+                0.0
+            },
         }
     }
 
@@ -58,10 +74,15 @@ pub struct RawSample {
 impl RawSample {
     #[must_use]
     pub fn new(pos: doodle_types::Point, pressure: Option<f32>, time_s: f64) -> Self {
+        let pos = if pos.is_finite() {
+            pos
+        } else {
+            doodle_types::Point::default()
+        };
         Self {
             pos,
-            pressure,
-            time_s,
+            pressure: pressure.filter(|value| value.is_finite()),
+            time_s: if time_s.is_finite() { time_s } else { 0.0 },
         }
     }
 }
@@ -81,6 +102,7 @@ pub struct StrokeBuilder {
     start_time: f64,
     speed_ema: f64,
     width_ema: f32,
+    last_pressure: f32,
     points: Vec<(doodle_types::Point, f32)>,
     has_hardware_pressure: bool,
     saw_pressure: bool,
@@ -90,11 +112,13 @@ impl StrokeBuilder {
     #[must_use]
     pub fn new(settings: BrushSettings, start: RawSample, min_distance: f64) -> Self {
         let settings = settings.sanitized();
-        let width = settings.base_width;
-        let pressure = start
+        let normalized_pressure = start
             .pressure
             .map(|p| p.clamp(0.0, 1.0) * 0.9 + 0.1)
             .unwrap_or(0.85);
+        let factor = (1.0 - settings.pressure_sensitivity)
+            + settings.pressure_sensitivity * normalized_pressure;
+        let width = (settings.base_width * factor).clamp(settings.base_width * 0.3, 400.0);
         Self {
             settings,
             min_distance: min_distance.max(0.05),
@@ -104,8 +128,9 @@ impl StrokeBuilder {
             last_time: start.time_s,
             start_time: start.time_s,
             speed_ema: 0.0,
-            width_ema: width * (0.5 + 0.5 * pressure),
-            points: vec![(doodle_types::Point::new(0.0, 0.0), width)],
+            width_ema: width,
+            last_pressure: normalized_pressure,
+            points: vec![(doodle_types::Point::default(), width)],
             has_hardware_pressure: start.pressure.is_some(),
             saw_pressure: start.pressure.is_some(),
         }
@@ -165,14 +190,16 @@ impl StrokeBuilder {
     }
 
     fn resolved_pressure(&mut self, sample: RawSample) -> f64 {
-        if let Some(pressure) = sample.pressure {
+        if let Some(pressure) = sample.pressure.filter(|value| value.is_finite()) {
             self.saw_pressure = true;
             self.has_hardware_pressure = true;
-            return f64::from(pressure.clamp(0.0, 1.0)) * 0.9 + 0.1;
+            let pressure = f64::from(pressure.clamp(0.0, 1.0)) * 0.9 + 0.1;
+            self.last_pressure = pressure as f32;
+            return pressure;
         }
         if self.has_hardware_pressure {
-            // A pen stroke keeps its last known pressure response when an occasional sample lacks it.
-            return 0.75;
+            // A pen stroke keeps its last known pressure response when a sample lacks it.
+            return f64::from(self.last_pressure).clamp(0.1, 1.0);
         }
         let speed_norm =
             (self.speed_ema / (f64::from(self.settings.base_width) * 9.0)).clamp(0.0, 3.0);
@@ -202,7 +229,7 @@ impl StrokeBuilder {
 
     fn build_geometry(&self) -> StrokeGeometry {
         if self.points.len() == 1 {
-            let width = (self.settings.base_width * 0.85).max(0.4);
+            let width = self.points[0].1.clamp(0.35, 400.0);
             return StrokeGeometry::new(vec![StrokePoint {
                 x: 0.0,
                 y: 0.0,
@@ -315,6 +342,72 @@ mod tests {
         assert!(builder.saw_hardware_pressure());
         let (_, geometry) = builder.finish();
         assert!(geometry.points[1].width > geometry.points[0].width);
+    }
+
+    #[test]
+    fn first_point_and_tap_follow_hardware_pressure() {
+        let settings = BrushSettings::default();
+        let light = StrokeBuilder::new(
+            settings,
+            RawSample::new(Point::new(0.0, 0.0), Some(0.0), 0.0),
+            0.5,
+        );
+        let heavy = StrokeBuilder::new(
+            settings,
+            RawSample::new(Point::new(0.0, 0.0), Some(1.0), 0.0),
+            0.5,
+        );
+        let (_, light_geometry) = light.finish();
+        let (_, heavy_geometry) = heavy.finish();
+        assert!(
+            light_geometry.points[0].width < heavy_geometry.points[0].width,
+            "a pressure tap must not use a fixed width"
+        );
+        assert!(
+            light_geometry.points[0].width < settings.base_width,
+            "first stored point must match the light start pressure"
+        );
+    }
+
+    #[test]
+    fn a_missing_pressure_sample_keeps_the_last_pen_pressure() {
+        let mut builder = StrokeBuilder::new(
+            BrushSettings {
+                pressure_sensitivity: 0.65,
+                taper_start: 0.0,
+                ..BrushSettings::default()
+            },
+            RawSample::new(Point::new(0.0, 0.0), Some(1.0), 0.0),
+            0.1,
+        );
+        builder.push(RawSample::new(Point::new(5.0, 0.0), None, 0.016));
+        let (_, geometry) = builder.finish();
+        let first = geometry.points[0].width;
+        let second = geometry.points[1].width;
+        assert!(
+            (first - second).abs() < 0.5,
+            "pressure glitch caused a width notch: {first} vs {second}"
+        );
+    }
+
+    #[test]
+    fn non_finite_settings_are_sanitized() {
+        let sanitized = BrushSettings {
+            pressure_sensitivity: f32::NAN,
+            smoothing: f32::INFINITY,
+            taper_start: f32::NAN,
+            base_width: f32::NAN,
+            ..BrushSettings::default()
+        }
+        .sanitized();
+        assert!(sanitized.base_width.is_finite());
+        assert!(sanitized.pressure_sensitivity.is_finite());
+        assert!(sanitized.smoothing.is_finite());
+        assert!(sanitized.taper_start.is_finite());
+        let sample = RawSample::new(Point::new(f64::NAN, 0.0), Some(f32::NAN), f64::NAN);
+        assert!(sample.pos.is_finite());
+        assert_eq!(sample.pressure, None);
+        assert!(sample.time_s.is_finite());
     }
 
     #[test]

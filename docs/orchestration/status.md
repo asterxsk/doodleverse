@@ -1,6 +1,6 @@
 # Delivery status
 
-Updated 2026-11-15. This file tracks what is complete, what is in flight, and what remains before
+Updated 2026-11-16. This file tracks what is complete, what is in flight, and what remains before
 the build can be called finished. It is not a changelog.
 
 ## Complete
@@ -13,7 +13,11 @@ the build can be called finished. It is not a changelog.
 | Grid renderer, stroke mesh cache | Done, tested |
 | Portable file encode/decode/validate/remap, atomic write | Done, tested |
 | Import placement ghost and single-command commit | Done |
-| Native app shell, floating toolbox, zen mode | Done, screenshot-verified |
+| eframe app shell, floating toolbox, zen mode | Done, screenshot-verified |
+| Rune app shell (`doodleverse-rune`): islands, Excalidraw-style toolbox, zen | Done, headless-screenshot-verified |
+| Rune board theming, settings panel scrolling, dark-board ink | Done, headless-screenshot-verified |
+| Rune file dialogs, export/import, pin flow, AI cards | Done, scripted-dialog-verified |
+| Rune app icon, secondary-monitor placement, clean `WM_CLOSE` | Done, real-window-verified |
 | Board presets, custom colors, grid sizing controls | Done, screenshot-verified |
 | Windows pen pressure probe + mouse simulation | Done; hardware path needs a tablet to verify |
 | AI card lifecycle, offline provider, pin flow | Done; streaming bug found and fixed in UI test |
@@ -23,22 +27,16 @@ the build can be called finished. It is not a changelog.
 
 ## In flight
 
-1. **Excalidraw UI scoping** — browser-only research on how Excalidraw constructs its floating
-   panels, tokens, typography, iconography, and interaction states. Output feeds the UI batch.
-2. **Rune feasibility** — evaluate `anomalyco/rune` at the pinned dev revision against the current
-   eframe/egui shell. Rune is a pre-release native Rust UI framework with its own renderer, so the
-   decision is either a scoped migration or a recorded blocker; it is not a drop-in dependency.
-3. **UI batch** — apply the scoping findings as one batch (chrome geometry, tokens, controls,
-   polish), then build once and verify visually.
+Nothing. The Rune shell is implemented and the full gate passes; the remaining items are the
+recorded product blockers (transport, providers, packaging).
 
 ## Next
 
-1. Finish Excalidraw scoping and Rune feasibility.
-2. Implement the batched UI changes.
-3. Reviewer pass over every UI surface and interaction: drawing, selection, move, marquee, group,
-   undo/redo, import/export roundtrip, pin flow, settings, zen, close confirmation, reduced motion.
-4. Fix review findings; rerun the full verification gate.
-5. Push a final checkpoint and update this file with the outcome.
+1. Optional: apply the Excalidraw scoping notes to further polish typography, iconography and
+   interaction states once the report arrives.
+2. Optional: mirror any Rune-only UI fixes back into the eframe shell if it is kept.
+3. Reviewer pass in a real window over the surfaces a headless script cannot reach: close
+   confirmation buttons, native file dialogs, hardware pen pressure.
 
 ## Constraints in force
 

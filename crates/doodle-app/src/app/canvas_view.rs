@@ -192,8 +192,11 @@ impl DoodleApp {
                 Tool::Draw => {
                     let time = ctx.input(|i| i.time);
                     let start = RawSample::new(world, doodle_platform::pen_pressure(), time);
-                    let builder =
-                        StrokeBuilder::new(self.brush, start, 0.7 / self.camera.zoom.max(0.05));
+                    let builder = StrokeBuilder::new(
+                        self.brush,
+                        start,
+                        0.7 / self.camera.zoom.max(doodle_types::MIN_ZOOM),
+                    );
                     self.stroke = Some(StrokeGesture {
                         builder,
                         style: self.brush.style(self.color),
@@ -283,9 +286,9 @@ impl DoodleApp {
                 let drag = self.drag.take().expect("drag exists");
                 if drag.moved {
                     let dx = f64::from(drag.last_screen.x - drag.start_screen.x)
-                        / self.camera.zoom.max(0.05);
+                        / self.camera.zoom.max(doodle_types::MIN_ZOOM);
                     let dy = f64::from(drag.last_screen.y - drag.start_screen.y)
-                        / self.camera.zoom.max(0.05);
+                        / self.camera.zoom.max(doodle_types::MIN_ZOOM);
                     if dx.abs() > 0.01 || dy.abs() > 0.01 {
                         self.move_selection(dx, dy);
                     }
@@ -361,7 +364,7 @@ impl DoodleApp {
     }
 
     fn hit_top(&self, world: Point) -> Option<ObjectId> {
-        let tolerance = 5.0 / self.camera.zoom.max(0.05);
+        let tolerance = 5.0 / self.camera.zoom.max(doodle_types::MIN_ZOOM);
         for projected in self.projection.objects.iter().rev() {
             match &projected.object.kind {
                 ObjectKind::Stroke(stroke) => {
@@ -391,10 +394,10 @@ impl DoodleApp {
         if let Some(drag) = &self.drag
             && drag.moved
         {
-            let dx =
-                f64::from(drag.last_screen.x - drag.start_screen.x) / self.camera.zoom.max(0.05);
-            let dy =
-                f64::from(drag.last_screen.y - drag.start_screen.y) / self.camera.zoom.max(0.05);
+            let dx = f64::from(drag.last_screen.x - drag.start_screen.x)
+                / self.camera.zoom.max(doodle_types::MIN_ZOOM);
+            let dy = f64::from(drag.last_screen.y - drag.start_screen.y)
+                / self.camera.zoom.max(doodle_types::MIN_ZOOM);
             for id in &drag.top_ids {
                 offsets.insert(*id, (dx, dy));
             }

@@ -61,6 +61,7 @@ pub struct AiCard {
     active_index: Option<usize>,
     generation: Option<GenerationHandle>,
     generation_serial: u64,
+    overflowed: bool,
 }
 
 impl AiCard {
@@ -76,6 +77,7 @@ impl AiCard {
             active_index: None,
             generation: None,
             generation_serial: 0,
+            overflowed: false,
         }
     }
 
@@ -88,6 +90,7 @@ impl AiCard {
         self.candidates.clear();
         self.selected = None;
         self.active_index = None;
+        self.overflowed = false;
         self.state = CardState::Draft;
     }
 
@@ -106,6 +109,7 @@ impl AiCard {
         }
         self.cancel();
         self.generation_serial += 1;
+        self.overflowed = false;
         self.candidates.push(Candidate {
             text: String::new(),
             complete: false,
@@ -150,15 +154,23 @@ impl AiCard {
                     let Some(candidate) = self.candidates.get_mut(index) else {
                         continue;
                     };
-                    if candidate.text.len() + text.len() <= MAX_ANSWER_BYTES {
+                    let remaining = MAX_ANSWER_BYTES.saturating_sub(candidate.text.len());
+                    if text.len() <= remaining {
                         candidate.text.push_str(&text);
+                    } else {
+                        self.overflowed = true;
                     }
                     self.state = CardState::Streaming;
                 }
                 ProviderEvent::Completed => {
-                    let partial = self.finish_candidate(true);
+                    let partial = self.finish_candidate(!self.overflowed);
                     self.generation = None;
-                    self.state = if partial {
+                    self.state = if self.overflowed {
+                        CardState::Failed {
+                            message: "answer exceeded the size limit".into(),
+                            partial: true,
+                        }
+                    } else if partial {
                         CardState::Failed {
                             message: "provider completed without an answer".into(),
                             partial: false,

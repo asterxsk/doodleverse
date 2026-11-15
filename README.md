@@ -4,12 +4,17 @@ A native, local-first whiteboard written in Rust. Infinite canvas, pressure-awar
 portable boards, and a small offline AI sketch partner named Dibby — no accounts, no
 cloud, no autosave.
 
-![Doodleverse UI](docs/images/doodleverse-ui.png)
+The interface now runs on [Rune](https://github.com/anomalyco/rune), anomalyco's Rust UI
+library, with an Excalidraw-style floating toolbox and Miro-style board theming. The
+original eframe/egui shell stays in the workspace as a second front end over the same core.
+
+![Doodleverse on Rune](docs/images/rune-window.png)
 
 ## What works today
 
-- **Infinite canvas** with cursor-anchored zoom, space/middle-drag panning, and a bounded
-  level-of-detail grid (dots, pluses, lines, or none).
+- **Infinite canvas** with cursor-anchored zoom, wheel/hand-tool panning (space- and
+  middle-drag in the eframe shell), and a bounded level-of-detail grid (dots, pluses, lines, or
+  none).
 - **Pressure-aware brush.** Mouse strokes simulate pressure from speed and progress. On
   Windows, tablet pen pressure is read from the native pointer stack and applied per sample.
 - **Selection and structure.** Marquee/click selection, move, delete, group, ungroup,
@@ -34,8 +39,15 @@ cloud, no autosave.
 Rust is pinned by `rust-toolchain.toml` (1.99.1 with rustfmt and clippy).
 
 ```bash
-cargo run --release -p doodle-app
+cargo run -p doodle-app-rune      # Rune UI (primary)
+cargo run --release -p doodle-app # eframe UI (reference shell)
 ```
+
+The Rune build pulls the pinned `rune` git revision and its five `[patch.crates-io]` entries
+(winit, parley_engine, wgpu-hal, accesskit_windows, accesskit_macos) from the workspace root.
+`Cargo.lock` pins `wgpu-hal` to Rune's patched 30.0.1 so both front ends resolve one copy.
+On Windows set `DOODLEVERSE_WINDOW_POS=x,y` to open at physical desktop pixels, e.g.
+`-1920,0` for a left-hand second monitor.
 
 Checks that gate the repository:
 
@@ -60,8 +72,9 @@ test never covers the primary display.
 | `Delete` / `Backspace` | Delete selection |
 | `Ctrl+G` / `Ctrl+Shift+G` | Group / ungroup selection |
 | `Ctrl+Z` / `Ctrl+Y` or `Ctrl+Shift+Z` | Undo / redo |
-| Wheel or trackpad scroll | Zoom at cursor |
-| Space-drag / middle-drag | Pan |
+| `H` | Hand tool (drag to pan) |
+| Wheel or trackpad scroll | Pan |
+| `Ctrl`/`Cmd` + wheel, or pinch | Zoom at cursor |
 | `F` / `0` | Fit content / reset view |
 | `Alt+Z` | Toggle Excalidraw-style zen mode |
 | `Esc` | Cancel stroke, drag, marquee, or pending import |
@@ -92,8 +105,9 @@ Imported content is remapped to fresh IDs so two boards can coexist. See
 | `doodle-ai` | AI card state machine, provider trait, offline demo provider, mascot |
 | `doodle-platform` | Native dialogs, pen pressure, test-window placement |
 | `doodle-app` | eframe/egui application shell and canvas UI |
+| `doodle-app-rune` | Rune application shell (`doodleverse-rune`): toolbox, theming, cards, dialogs |
 
-Dependencies point inward: app → render/files/ai/document/canvas → types. See
+Dependencies point inward: app shells → render/files/ai/document/canvas → types. See
 [docs/architecture.md](docs/architecture.md) for the data flow and invariants.
 
 ## Honest limitations

@@ -76,12 +76,17 @@ pub struct BoardProjection {
     pub objects: Vec<ProjectedObject>,
     pub revision: u64,
     pub total_stroke_points: usize,
+    /// Lookup index into `objects`. Public only so test fixtures can build a projection literal.
+    #[doc(hidden)]
+    pub index: HashMap<ObjectId, usize>,
 }
 
 impl BoardProjection {
     #[must_use]
     pub fn get(&self, id: ObjectId) -> Option<&ProjectedObject> {
-        self.objects.iter().find(|object| object.object.id == id)
+        self.index
+            .get(&id)
+            .and_then(|index| self.objects.get(*index))
     }
 
     pub fn top_level(&self) -> impl Iterator<Item = &ProjectedObject> {
@@ -307,6 +312,34 @@ impl BoardDocument {
                 return Err(CommandError::InvalidObject.into());
             }
         }
+        let new_by_id: HashMap<ObjectId, &StoredObject> =
+            objects.iter().map(|object| (object.id, object)).collect();
+        for object in &objects {
+            let mut depth = 0usize;
+            let mut current = object.parent;
+            let mut visited = HashSet::new();
+            visited.insert(object.id);
+            while let Some(parent_id) = current {
+                if !visited.insert(parent_id) {
+                    return Err(CommandError::WouldCycle.into());
+                }
+                let parent = new_by_id
+                    .get(&parent_id)
+                    .copied()
+                    .or_else(|| existing.get(&parent_id));
+                let Some(parent) = parent else {
+                    return Err(CommandError::InvalidObject.into());
+                };
+                if !parent.kind.is_group() {
+                    return Err(CommandError::InvalidObject.into());
+                }
+                depth += 1;
+                if depth > MAX_GROUP_DEPTH {
+                    return Err(CommandError::LimitExceeded.into());
+                }
+                current = parent.parent;
+            }
+        }
         let prepared = objects
             .iter()
             .map(Prepared::from_object)
@@ -359,12 +392,12 @@ impl BoardDocument {
             let mut txn = self.doc.transact_mut_with(ORIGIN_LOCAL);
             for id in &leaf_ids {
                 if let Some(mut object) = before.get(id).cloned().flatten() {
+                    let original = object.clone();
                     object.pose = Pose::new(object.pose.x + dx, object.pose.y + dy);
                     if !object.pose.is_finite() {
                         continue;
                     }
-                    let prepared = Prepared::from_object(&object)?;
-                    self.write_prepared(&mut txn, &prepared)?;
+                    self.write_changed(&mut txn, &original, &object)?;
                     moved.push(*id);
                 }
             }
@@ -416,6 +449,9 @@ impl BoardDocument {
 
     pub fn group_selection(&mut self, ids: &[ObjectId]) -> Result<DocumentOutcome, DocumentError> {
         let projection = self.project()?;
+        if projection.objects.len() >= MAX_OBJECTS {
+            return Err(DocumentError::Limit);
+        }
         let top = projection.expand_to_top_level(ids);
         if top.len() < 2 {
             return Err(CommandError::GroupNeedsTwoObjects.into());
@@ -469,8 +505,7 @@ impl BoardDocument {
             for object in &selected {
                 let mut child = object.object.clone();
                 child.parent = Some(group_id);
-                let prepared = Prepared::from_object(&child)?;
-                self.write_prepared(&mut txn, &prepared)?;
+                self.write_changed(&mut txn, &object.object, &child)?;
             }
         }
         self.revision += 1;
@@ -530,8 +565,12 @@ impl BoardDocument {
         {
             let mut txn = self.doc.transact_mut_with(ORIGIN_LOCAL);
             for object in &children_updates {
-                let prepared = Prepared::from_object(object)?;
-                self.write_prepared(&mut txn, &prepared)?;
+                if let Some(original) = before.get(&object.id).and_then(Option::as_ref) {
+                    self.write_changed(&mut txn, original, object)?;
+                } else {
+                    let prepared = Prepared::from_object(object)?;
+                    self.write_prepared(&mut txn, &prepared)?;
+                }
             }
             for group_id in &groups {
                 self.objects.remove(&mut txn, &group_id.to_string());
@@ -577,19 +616,44 @@ impl BoardDocument {
             let mut txn = self.doc.transact_mut_with(ORIGIN_LOCAL);
             for delta in deltas {
                 let target = if forward { &delta.after } else { &delta.before };
+                let source = if forward { &delta.before } else { &delta.after };
+                let key = delta.id.to_string();
+                let current = match self.objects.get(&txn, &key) {
+                    Some(Out::YMap(map)) => read_object(&map, &txn, delta.id),
+                    _ => None,
+                };
                 match target {
                     Some(object) => {
-                        let prepared = Prepared::from_object(object)?;
-                        self.write_prepared(&mut txn, &prepared)?;
+                        if current.is_some() && source.is_none() {
+                            // The object already exists; never overwrite a peer's version by
+                            // replaying a whole-object creation delta.
+                            continue;
+                        }
+                        if current.is_none() && source.is_some() {
+                            // A peer removed an object this command only moved or regrouped.
+                            // Undoing the local command must not resurrect it.
+                            continue;
+                        }
+                        let fields = if current.is_some() {
+                            changed_fields(source.as_ref(), object)
+                        } else {
+                            WriteFields::all()
+                        };
+                        if fields.is_empty() {
+                            continue;
+                        }
+                        self.write_fields(&mut txn, object, fields)?;
                         changed.push(object.id);
                         if delta.before.is_none() {
                             created.push(object.id);
                         }
                     }
                     None => {
-                        self.objects.remove(&mut txn, &delta.id.to_string());
-                        deleted.push(delta.id);
-                        changed.push(delta.id);
+                        if current.is_some() {
+                            self.objects.remove(&mut txn, &key);
+                            deleted.push(delta.id);
+                            changed.push(delta.id);
+                        }
                     }
                 }
             }
@@ -759,6 +823,53 @@ impl BoardDocument {
         }
     }
 
+    fn write_changed(
+        &self,
+        txn: &mut TransactionMut<'_>,
+        before: &StoredObject,
+        after: &StoredObject,
+    ) -> Result<(), DocumentError> {
+        self.write_fields(txn, after, changed_fields(Some(before), after))
+    }
+
+    /// Writes only the fields a command actually changed. Rewriting an unchanged field would
+    /// stamp it with a fresh CRDT clock and let a local move win over a concurrent peer edit of
+    /// that same field.
+    fn write_fields(
+        &self,
+        txn: &mut TransactionMut<'_>,
+        object: &StoredObject,
+        fields: WriteFields,
+    ) -> Result<(), DocumentError> {
+        if fields.is_empty() {
+            return Ok(());
+        }
+        let key = object.id.to_string();
+        let map = self.object_map(txn, &key);
+        if fields.kind_data {
+            let prepared = Prepared::from_object(object)?;
+            map.insert(txn, "kind", prepared.kind.as_str());
+            map.insert(txn, "data", prepared.kind_bytes);
+        }
+        if fields.parent {
+            map.insert(
+                txn,
+                "parent",
+                object.parent.map(|id| id.to_string()).unwrap_or_default(),
+            );
+        }
+        if fields.order {
+            map.insert(txn, "order", object.order_key);
+        }
+        if fields.pose_x {
+            map.insert(txn, "pose_x", object.pose.x);
+        }
+        if fields.pose_y {
+            map.insert(txn, "pose_y", object.pose.y);
+        }
+        Ok(())
+    }
+
     fn write_prepared(
         &self,
         txn: &mut TransactionMut<'_>,
@@ -777,6 +888,44 @@ impl BoardDocument {
         map.insert(txn, "pose_y", prepared.pose.y);
         map.insert(txn, "data", prepared.kind_bytes.clone());
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct WriteFields {
+    kind_data: bool,
+    parent: bool,
+    order: bool,
+    pose_x: bool,
+    pose_y: bool,
+}
+
+impl WriteFields {
+    const fn all() -> Self {
+        Self {
+            kind_data: true,
+            parent: true,
+            order: true,
+            pose_x: true,
+            pose_y: true,
+        }
+    }
+
+    const fn is_empty(self) -> bool {
+        !(self.kind_data || self.parent || self.order || self.pose_x || self.pose_y)
+    }
+}
+
+fn changed_fields(before: Option<&StoredObject>, after: &StoredObject) -> WriteFields {
+    let Some(before) = before else {
+        return WriteFields::all();
+    };
+    WriteFields {
+        kind_data: before.kind != after.kind,
+        parent: before.parent != after.parent,
+        order: before.order_key != after.order_key,
+        pose_x: before.pose.x != after.pose.x,
+        pose_y: before.pose.y != after.pose.y,
     }
 }
 
@@ -897,85 +1046,93 @@ fn project_objects(raw: HashMap<ObjectId, StoredObject>, revision: u64) -> Board
         parents.insert(*id, valid_parent);
     }
 
-    // Deterministic cycle projection: cut the edge from the greatest id in each cycle.
-    loop {
-        let mut cut_any = false;
+    // Cut cycles and over-deep chains with a bounded walk per object. A single pass cuts the
+    // edge at the depth limit for every overly deep branch; repeat until stable so a cut that
+    // re-roots one node cannot leave another chain over the cap.
+    let mut changed = true;
+    let mut passes = 0;
+    while changed && passes < MAX_GROUP_DEPTH {
+        changed = false;
+        passes += 1;
         for id in &ids {
             let mut chain: Vec<ObjectId> = Vec::new();
-            let mut seen: HashMap<ObjectId, usize> = HashMap::new();
+            let mut positions: HashMap<ObjectId, usize> = HashMap::new();
             let mut current = Some(*id);
             while let Some(node) = current {
-                if let Some(&start) = seen.get(&node) {
-                    let cycle = &chain[start..];
-                    if let Some(max) = cycle.iter().max()
+                if let Some(&start) = positions.get(&node) {
+                    if let Some(max) = chain[start..].iter().max()
                         && parents.get(max).copied().flatten().is_some()
                     {
                         parents.insert(*max, None);
-                        cut_any = true;
+                        changed = true;
                     }
                     break;
                 }
-                seen.insert(node, chain.len());
+                positions.insert(node, chain.len());
                 chain.push(node);
+                if chain.len() > MAX_GROUP_DEPTH {
+                    if let Some(&deep) = chain.get(MAX_GROUP_DEPTH)
+                        && parents.get(&deep).copied().flatten().is_some()
+                    {
+                        parents.insert(deep, None);
+                        changed = true;
+                    }
+                    break;
+                }
                 current = parents.get(&node).copied().flatten();
             }
-            if cut_any {
-                break;
-            }
-        }
-        if !cut_any {
-            break;
         }
     }
 
-    // Resolve depth bottom-up with a hard cap; deeper links are projected to root.
+    // Resolve depth and top-level ancestor bottom-up, memoized across chains.
     let mut depths: HashMap<ObjectId, u16> = HashMap::new();
-    loop {
-        let mut progress = false;
-        for id in &ids {
-            if depths.contains_key(id) {
-                continue;
-            }
-            match parents.get(id).copied().flatten() {
-                None => {
-                    depths.insert(*id, 0);
-                    progress = true;
-                }
-                Some(parent) => {
-                    if let Some(parent_depth) = depths.get(&parent).copied() {
-                        if usize::from(parent_depth) + 1 > MAX_GROUP_DEPTH {
-                            parents.insert(*id, None);
-                            depths.insert(*id, 0);
-                        } else {
-                            depths.insert(*id, parent_depth + 1);
-                        }
-                        progress = true;
-                    }
-                }
-            }
-        }
-        if !progress {
-            for id in &ids {
-                if depths.insert(*id, 0).is_none() {
-                    parents.insert(*id, None);
-                }
-            }
-            break;
-        }
-    }
-
     let mut tops: HashMap<ObjectId, ObjectId> = HashMap::new();
     for id in &ids {
+        if depths.contains_key(id) {
+            continue;
+        }
+        let mut chain: Vec<ObjectId> = Vec::new();
+        let mut local: HashSet<ObjectId> = HashSet::new();
         let mut current = *id;
-        let mut steps = 0;
-        while let Some(parent) = parents.get(&current).copied().flatten() {
-            current = parent;
-            steps += 1;
-            if steps > MAX_GROUP_DEPTH {
+        while !depths.contains_key(&current) {
+            if !local.insert(current) {
+                parents.insert(current, None);
                 break;
             }
+            chain.push(current);
+            match parents.get(&current).copied().flatten() {
+                Some(parent) => current = parent,
+                None => break,
+            }
         }
-        tops.insert(*id, current);
+        if let std::collections::hash_map::Entry::Vacant(slot) = depths.entry(current) {
+            slot.insert(0);
+            tops.insert(current, current);
+        }
+        for node in chain.into_iter().rev() {
+            if depths.contains_key(&node) {
+                continue;
+            }
+            match parents
+                .get(&node)
+                .copied()
+                .flatten()
+                .filter(|parent| depths.contains_key(parent))
+            {
+                Some(parent) => {
+                    let depth = depths[&parent]
+                        .saturating_add(1)
+                        .min(MAX_GROUP_DEPTH as u16);
+                    depths.insert(node, depth);
+                    let top = tops.get(&parent).copied().unwrap_or(parent);
+                    tops.insert(node, top);
+                }
+                None => {
+                    depths.insert(node, 0);
+                    tops.insert(node, node);
+                }
+            }
+        }
     }
 
     let mut group_bounds: HashMap<ObjectId, Rect> = HashMap::new();
@@ -1027,10 +1184,16 @@ fn project_objects(raw: HashMap<ObjectId, StoredObject>, revision: u64) -> Board
             .cmp(&b.object.order_key)
             .then_with(|| a.object.id.cmp(&b.object.id))
     });
+    let index = objects
+        .iter()
+        .enumerate()
+        .map(|(index, object)| (object.object.id, index))
+        .collect();
     BoardProjection {
         objects,
         revision,
         total_stroke_points: total_stroke_points.min(MAX_TOTAL_STROKE_POINTS + 1),
+        index,
     }
 }
 
@@ -1093,7 +1256,7 @@ mod tests {
             .iter()
             .map(|object| object.object.id)
             .collect();
-        let before: Vec<_> = doc
+        let before: HashMap<_, _> = doc
             .project()
             .expect("projection")
             .leaves()
@@ -1105,23 +1268,26 @@ mod tests {
         let group = projection.get(group_id).expect("group");
         assert!(group.is_group());
         assert!(group.bounds.is_some());
-        assert_eq!(
-            projection
-                .leaves()
-                .map(|object| (object.object.id, object.object.pose))
-                .collect::<Vec<_>>()
-                .len(),
-            2
-        );
-        let after: Vec<_> = projection
+        let after: HashMap<_, _> = projection
             .leaves()
             .map(|object| (object.object.id, object.object.pose))
             .collect();
-        assert_eq!(before.len(), after.len());
+        assert_eq!(
+            before, after,
+            "grouping must preserve leaf identity and pose"
+        );
         doc.ungroup(&[group_id]).expect("ungroup");
         let projection = doc.project().expect("projection");
         assert!(projection.get(group_id).is_none());
         assert!(projection.top_level().all(|object| !object.is_group()));
+        let ungrouped: HashMap<_, _> = projection
+            .leaves()
+            .map(|object| (object.object.id, object.object.pose))
+            .collect();
+        assert_eq!(
+            before, ungrouped,
+            "ungrouping must preserve leaf identity and pose"
+        );
     }
 
     #[test]
@@ -1204,6 +1370,106 @@ mod tests {
         let diff = a.encode_diff_v1(&sv).expect("diff");
         b.apply_remote_update_v1(&diff).expect("apply");
         assert_eq!(normalized(&a), normalized(&b));
+    }
+
+    #[test]
+    fn undo_move_does_not_undo_remote_grouping() {
+        let mut a = doc_with_strokes(2);
+        let mut b = BoardDocument::new();
+        b.apply_remote_update_v1(&a.encode_full_update_v1())
+            .expect("sync");
+        let ids: Vec<ObjectId> = a
+            .project()
+            .expect("projection")
+            .objects
+            .iter()
+            .map(|object| object.object.id)
+            .collect();
+        let moved_id = ids[0];
+        a.move_objects(&[moved_id], 10.0, 0.0).expect("move");
+        let group = b.group_selection(&ids).expect("group").created[0];
+        let diff = b.encode_diff_v1(&a.state_vector_v1()).expect("diff");
+        a.apply_remote_update_v1(&diff).expect("apply grouping");
+        assert_eq!(
+            a.project()
+                .expect("projection")
+                .get(moved_id)
+                .unwrap()
+                .parent,
+            Some(group)
+        );
+        a.undo().expect("undo move");
+        let after = a.project().expect("projection");
+        let moved = after.get(moved_id).expect("still present");
+        assert_eq!(moved.parent, Some(group), "undo must not leave the group");
+    }
+
+    #[test]
+    fn undo_move_does_not_resurrect_a_remote_delete() {
+        let mut a = doc_with_strokes(2);
+        let mut b = BoardDocument::new();
+        b.apply_remote_update_v1(&a.encode_full_update_v1())
+            .expect("sync");
+        let id = a.project().expect("projection").objects[0].object.id;
+        a.move_objects(&[id], 12.0, 4.0).expect("move");
+        b.delete_objects(&[id]).expect("delete");
+        let diff = b.encode_diff_v1(&a.state_vector_v1()).expect("diff");
+        a.apply_remote_update_v1(&diff).expect("apply delete");
+        assert!(a.project().expect("projection").get(id).is_none());
+        a.undo().expect("undo move");
+        assert!(
+            a.project().expect("projection").get(id).is_none(),
+            "undoing a local move must not resurrect a peer-deleted object"
+        );
+    }
+
+    #[test]
+    fn over_deep_local_hierarchy_is_rejected() {
+        let mut doc = BoardDocument::new();
+        let mut objects = Vec::new();
+        let mut parent = None;
+        for index in 0..66 {
+            let object = StoredObject {
+                id: ObjectId::new(),
+                parent,
+                order_key: index,
+                pose: Pose::default(),
+                kind: ObjectKind::Group,
+            };
+            parent = Some(object.id);
+            objects.push(object);
+        }
+        let result = doc.commit_import(objects);
+        assert!(result.is_err(), "depth 65 must be rejected");
+        assert!(doc.project().expect("projection").objects.is_empty());
+    }
+
+    #[test]
+    fn deep_raw_projection_stays_bounded() {
+        let mut raw = HashMap::new();
+        let mut parent = None;
+        for index in 0..10_000 {
+            let id = ObjectId::new();
+            raw.insert(
+                id,
+                StoredObject {
+                    id,
+                    parent,
+                    order_key: index,
+                    pose: Pose::default(),
+                    kind: ObjectKind::Group,
+                },
+            );
+            parent = Some(id);
+        }
+        let projection = project_objects(raw, 0);
+        assert_eq!(projection.objects.len(), 10_000);
+        assert!(
+            projection
+                .objects
+                .iter()
+                .all(|object| object.depth <= MAX_GROUP_DEPTH as u16)
+        );
     }
 
     #[test]

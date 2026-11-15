@@ -87,14 +87,33 @@ Rendering is immediate mode. Strokes are cached as triangle meshes keyed by revi
 zoom; a new revision or camera invalidates the cache. The grid is generated from a bounded
 level-of-detail frame so it neither aliases nor allocates unbounded dots at high zoom.
 
-## UI shell
+## UI shells
 
-The app draws one `CentralPanel` for the canvas and floating `Area` islands above it: menu,
-vertical tools, actions, and bottom status/zoom. `Alt+Z` hides every island and leaves a single hint;
-the same shortcut restores them. Settings and help are egui windows; destructive close is a modal.
+Two front ends sit on the same crates. `doodle-app` is the original eframe/egui shell;
+`doodle-app-rune` is the current UI, built with Rune at revision
+`958743308f36fdf1c568c513badc96ddb0c7f040`.
 
-The canvas owns input precedence: pending import ghost, active stroke, active move, marquee, then
-idle shortcuts. Text fields consume keyboard input before global shortcuts.
+Both draw one full-window canvas layer and absolutely positioned islands above it: a menu
+island (Doodleverse / Ask Dibby / Export), a vertical tool island (Brush, Select, Hand, six
+swatches, size slider, Undo/Redo), a right-pinned action island (Group, Ungroup, Fit,
+Settings), and bottom status/zoom islands. `Alt+Z` hides every island, closes any open panel,
+and leaves one hint; the same shortcut restores them. Settings is a fixed-height column panel
+with a sticky header and close button, help is a floating panel, and close/pin are centered modals.
+
+The Rune shell keeps its own small state machine in `app.rs` (`DoodleApp`) mirroring the
+eframe state, with `view.rs` building the element tree, `canvas.rs` drawing the grid and
+strokes into one `Shape`, `cards.rs` rendering AI cards, and `theme.rs` holding the light/dark
+palettes. Input precedence matches the eframe shell: pending import ghost, active stroke,
+active move, marquee, then idle shortcuts. Text fields consume keyboard input first. The
+canvas owns the wheel unless the pointer is over the settings panel, whose scroll view
+takes it; island roots are hit-testable so clicks never fall through to the board.
+
+Rune has no per-vertex canvas mesh, so a pressure stroke is emitted as one `line` shape per
+segment, each with its own averaged width and round caps. That approximates the eframe
+tapered mesh at the cost of more draw instances; the segment budget is capped at 200k.
+File dialogs use Rune's `Tx::open_file` / `Tx::save_file` (feature `native-file-dialog`), so
+headless runs can answer them with scripted `file-dialog` events. The app icon is set with
+`rune::set_app_icon` from the same `assets/app-icon.png` the eframe shell embeds.
 
 ## AI boundary
 
@@ -131,5 +150,6 @@ speed/progress envelope.
 | New canvas tool | `doodle-app/src/app/canvas_view.rs`, `doodle-canvas` |
 | New file field | envelope version bump, `doodle-files`, snapshot validation |
 | New AI provider | implement `AiProvider` in `doodle-ai`; do not widen the boundary |
-| Theme/layout | `doodle-app/src/app/chrome.rs`, `panels.rs` |
+| Theme/layout (eframe) | `doodle-app/src/app/chrome.rs`, `panels.rs` |
+| Theme/layout (Rune) | `doodle-app-rune/src/view.rs`, `theme.rs` |
 | Native input | `doodle-platform`, then map into `RawSample` |

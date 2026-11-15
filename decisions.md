@@ -195,6 +195,65 @@ without them is recorded here.
   probes land; the API returns `None` there, which is the same path as using a mouse. The subclass
   only reads pointer messages and forwards every message unchanged.
 
+### D22 — Rune becomes the primary UI, eframe stays as a second shell
+- **Because:** the user asked specifically for the Rune library by anomalyco, with the UI modified
+  to match Excalidraw. Rune is a native Rust UI toolkit with its own renderer, so it was added as a
+  new binary (`doodleverse-rune`) over the same `doodle-*` crates instead of rewriting the eframe
+  shell in place.
+- **Alternatives:** restyle egui to imitate Excalidraw (egui widgets cannot match the island look
+  without custom painting); delete the eframe app (loses a working reference shell and its tests).
+- **Reversibility:** cheap — both shells are separate binaries over shared crates.
+- **Risk if wrong:** two UI code bases to keep in sync; features added to one must be mirrored in
+  the other, or the eframe shell drifts and is eventually retired.
+
+### D23 — Pin Rune to one revision and patch five crates
+- **Because:** Rune at `958743308f36fdf1c568c513badc96ddb0c7f040` needs its own winit,
+  parley_engine, wgpu-hal, accesskit_windows and accesskit_macos forks. The workspace carries the
+  five `[patch.crates-io]` entries at the root, and `Cargo.lock` resolves the shared `wgpu-hal` to
+  Rune's patched 30.0.1 so eframe and Rune link one copy.
+- **Alternatives:** a separate workspace for the Rune app (shared `doodle-*` crates would need
+  path dependencies and duplicate lockfiles); floating on Rune `main` (build breaks are guaranteed).
+- **Reversibility:** medium — moving the pins means re-checking both shells compile.
+- **Risk if wrong:** a Rune update can require touching the patches and re-resolving `wgpu-hal`.
+
+### D24 — Pressure taper as one line shape per segment
+- **Because:** Rune's `Shape` API has no per-vertex mesh, so a stroke cannot vary width within one
+  polyline. Each segment is emitted as its own `line` with the averaged pressure width and round
+  caps, which preserves the visual taper at the cost of more instances.
+- **Alternatives:** a single fixed-width polyline (loses pressure response, contradicts the PRD);
+  a custom wgpu pipeline inside Rune (large, fragile against the pinned revision).
+- **Reversibility:** cheap — `canvas.rs::draw_stroke` is the only place that emits segments.
+- **Risk if wrong:** long strokes get expensive; the renderer caps the segment budget at 200k.
+
+### D25 — File dialogs through Rune's `Tx::open_file` / `Tx::save_file`
+- **Because:** the blocking `rfd` dialogs used by the eframe shell bypass Rune's headless dialog
+  interception and hung scripted runs. Rune's transactional dialogs (feature
+  `native-file-dialog`) work in both real windows and headless scripts.
+- **Alternatives:** keep `rfd` and give up headless file testing; stub dialogs behind a cfg flag.
+- **Reversibility:** cheap — both call sites live in `app.rs`.
+- **Risk if wrong:** Rune's dialog API changes with the pinned revision; the feature must stay
+  enabled in `Cargo.toml`.
+
+### D26 — Default ink follows the board theme
+- **Because:** a dark board with the light-theme default ink made new strokes nearly invisible.
+  Switching theme or board preset now swaps only the two default inks (dark ↔ light); any color the
+  user picked is never touched.
+- **Alternatives:** always start light strokes after a theme change (overrides user choice);
+  leave it to the user.
+- **Reversibility:** cheap.
+- **Risk if wrong:** a user who intentionally toggles themes may see their first default color
+  change once, which is the intent.
+
+### D27 — Settings panel is a column island with its own scroll view
+- **Because:** Rune's default `el()` lays children out as a row, and a row stretches its child to
+  the panel height, so the content never registers as overflowing and wheel scrolling did nothing.
+  A column island with a fixed `.h(..)` makes the scroll view real. The canvas wheel handler also
+  ignores wheel events whose pointer is inside the panel rect, so the board beneath never pans.
+- **Alternatives:** keep the row island and clamp content into view (unreachable brush controls);
+  manual offset scrolling (needs a content height the layout does not expose).
+- **Reversibility:** cheap — `view.rs::settings_panel` and `theme::island_col`.
+- **Risk if wrong:** any future panel with fixed height and scrolling must use `island_col`.
+
 ## Assumptions
 
 - **A01 — Rust 1.99.1 toolchain is acceptable.** `rust-toolchain.toml` pins it, matching the
@@ -234,3 +293,28 @@ without them is recorded here.
 - **B07 — PR / release publication.** Checkpoints are pushed to `main` on
   `https://github.com/asterxsk/doodleverse` under explicit authorization. No pull request or
   release was created. Resume with a PR/branch review or a tagged release if desired.
+
+## Close-out (2026-11-16)
+
+**Shipped:** the Rune front end (`crates/doodle-app-rune`, binary `doodleverse-rune`) over the
+existing core: Excalidraw-style floating islands, `B`/`V`/`H` tools, marquee/group/move/delete,
+undo/redo, six board presets plus custom board and grid colors, grid spacing/opacity/mark size/line
+width, brush size/pressure/smoothing/taper sliders, light/dark themes with theme-aware default ink,
+zen mode, AI cards with streaming and pinning, scripted-dialog export/import, close confirmation,
+the Windows pen-pressure hook, a secondary-monitor placement env var, and the restored app icon.
+The eframe shell still builds and keeps its tests.
+
+**Gate run in this workspace:** `cargo fmt --all -- --check` pass, `cargo clippy --workspace
+--all-targets --locked -- -D warnings` pass, `cargo test --workspace --locked` 69 passed / 0 failed,
+`cargo build --workspace --release --locked` pass. Rune scenarios were driven headlessly and
+recorded in [`docs/verification.md`](docs/verification.md); the real window was checked on the
+secondary monitor, including a clean `WM_CLOSE`.
+
+**Review before relying on:** D22 (two shells), D23 (five crate patches and the `wgpu-hal` pin),
+D24 (per-segment stroke width is an approximation of a tapered mesh), D27 (Rune row-vs-column scroll
+gotcha). All are cheap to reverse and documented above.
+
+**Still blocked:** the same product blockers as before — WebRTC transport (B01), real AI providers
+and credentials (B02–B04), OS vault and non-Windows pen pressure (B05), packaging/signing (B06),
+and PR/release publication (B07). Pushing checkpoints to the authorized GitHub remote is not
+blocked and continues.

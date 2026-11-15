@@ -163,6 +163,7 @@ impl DoodleApp {
             objects: Vec::new(),
             revision: doc.revision(),
             total_stroke_points: 0,
+            index: std::collections::HashMap::new(),
         });
         let now = Instant::now();
         Self {
@@ -216,6 +217,7 @@ impl DoodleApp {
             objects: Vec::new(),
             revision: self.doc.revision(),
             total_stroke_points: 0,
+            index: std::collections::HashMap::new(),
         });
         self.projection_revision = self.doc.revision();
         self.selection.retain(|id| {
@@ -525,7 +527,7 @@ impl DoodleApp {
             style: StatementStyle::default(),
         };
         let pose = Pose::new(
-            card.card.world_pos.x + 384.0 / self.camera.zoom.max(0.05),
+            card.card.world_pos.x + 384.0 / self.camera.zoom.max(doodle_types::MIN_ZOOM),
             card.card.world_pos.y,
         );
         match self.doc.create_statement(pose, statement) {
