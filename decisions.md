@@ -290,6 +290,11 @@ without them is recorded here.
 - **B06 — Packaging, signing, release (P17/P20).** Needs signing identities and store accounts.
   Resume with `cargo-bundle`/MSIX/notarization as chosen by the user; the window icon is already
   embedded from the approved PNG.
+- **B08 — Excalidraw UI scoping report.** The delegated browser-scoping subagent (OpenCode,
+  DeepSeek, browse MCP) was launched but returned no report and left no artifact or log. The Rune
+  UI was therefore built from the user's description, the PRD, and general product knowledge of
+  Excalidraw's floating-island layout. Resume by re-running the scoping pass and applying any
+  typography, iconography or interaction-state refinements it surfaces.
 - **B07 — PR / release publication.** Checkpoints are pushed to `main` on
   `https://github.com/asterxsk/doodleverse` under explicit authorization. No pull request or
   release was created. Resume with a PR/branch review or a tagged release if desired.
