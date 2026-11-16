@@ -352,3 +352,31 @@ gotcha). All are cheap to reverse and documented above.
 and credentials (B02–B04), OS vault and non-Windows pen pressure (B05), packaging/signing (B06),
 and PR/release publication (B07). Pushing checkpoints to the authorized GitHub remote is not
 blocked and continues.
+
+## Overnight close-out (2026-11-16, second session)
+
+**Shipped:** the Excalidraw top bar in `1faf8be` (board menu top left, centred horizontal icon
+toolbar, three-dot overflow top right) and the token/icon/accessibility pass in `91c38a1`: indigo
+accent, radius-8 islands, 36×36 tool boxes, 22×22 swatches, `#121212` dark canvas, Rune-shape
+icons, instant popovers, dialog focus traps with inert backgrounds, named/checked/disabled
+controls, slider roles and values, first-frame viewport sizing, card and answer sizing, pinned-note
+placement with shrink-to-fit and 12pt margins, narrow-width Export in the overflow, Escape overlay
+priority, press-leak suppression, and the pluralisation fix.
+
+**Verification:** ten independent fresh-subagent QA rounds at 1180×760 and 880×600 in light and
+dark; each round's findings fixed by a separate implementer and re-tested by a new tester. Final
+gate: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D
+warnings`, `cargo test --workspace --locked` (69 passed), `cargo build --workspace --release
+--locked` all pass. Release build launched in a real window: title-bar/taskbar icon present, new
+chrome renders, `WM_CLOSE` on an empty board exits cleanly.
+
+**Decisions to review first:** D28 (token table), D29 (icons from Rune shapes), D30 (recorded Rune
+deviations: no pressed border, Assistant not bundled, coral survives as the Coral brush preset).
+
+**Known residuals:** an extremely long pinned answer narrowed to 200pt can still exceed the free
+board height and falls back to least-overlap; a group container counts as one status object; the
+unsaved-board close dialog shares the verified pin-dialog code but cannot be raised headlessly.
+
+**Still blocked:** B01–B07 unchanged (transport, real AI providers and credentials, OS vault and
+non-Windows pen pressure, packaging/signing, PR/release publication). Checkpoints continue on the
+authorized GitHub remote.
