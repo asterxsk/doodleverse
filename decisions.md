@@ -254,6 +254,36 @@ without them is recorded here.
 - **Reversibility:** cheap — `view.rs::settings_panel` and `theme::island_col`.
 - **Risk if wrong:** any future panel with fixed height and scrolling must use `island_col`.
 
+### D28 — Adopt the Excalidraw token table for the Rune chrome
+- **Because:** the scoping report measured the live app; matching its surfaces, indigo accent and
+  geometry is what makes the Rune shell read as Excalidraw rather than an approximation. Values:
+  light bg `#ffffff`, card `#ffffff`, border `#f1f0ff`, text `#1b1b1f`, accent `#6965db`; dark bg
+  `#121212`, card `#232329`, border `#2e2d39`, text `#e3e3e8`, accent `#a8a5ff`.
+- **Alternatives:** keep the warm coral palette (inconsistent with the Excalidraw arrangement the
+  user asked for); use a fully custom palette (no reference to verify against).
+- **Reversibility:** cheap — one palette function in `theme.rs`.
+- **Risk if wrong:** the app's previous warm identity is gone; restoring it is a palette edit.
+
+### D29 — Draw toolbar icons from Rune shapes, not SVG paths
+- **Because:** Rune has no SVG path element but does expose `Shape`/`Path`/`LineCap`; simplified
+  pencil, cursor, hand and three-dot geometry fits the same 16px grid and keeps the crate
+  dependency-free. Every tool keeps its key and handler and gains an accessibility label.
+- **Alternatives:** bundle an icon font (licensing, another dependency); parse SVG path data
+  (arc segments in the spec paths make this disproportionate).
+- **Reversibility:** cheap — icons live in four small helpers in `view.rs`.
+- **Risk if wrong:** the hand and cursor read slightly more geometric than Excalidraw's curves.
+
+### D30 — Record spec deviations instead of hacking around Rune's state model
+- **Because:** Rune's `El` supports a pressed fill and pressed text colour but no pressed border, so
+  the spec's "hover bg + 1px `#4440bf`" cannot be expressed without changing the rest state.
+  Assistant is not bundled because its redistribution licence is unverified; the system font stack
+  stands in. The six brush preset colours stay as artwork defaults, so the old coral survives as
+  the "Coral" swatch while the accent role is indigo.
+- **Alternatives:** force a border on press by swapping elements (flicker, layout churn); bundle
+  Assistant anyway (licence risk); rename the Coral swatch (breaks the unchanged-key rule).
+- **Reversibility:** cheap — each deviation is one helper or constant.
+- **Risk if wrong:** pressed states stay visually flatter than Excalidraw's.
+
 ## Assumptions
 
 - **A01 — Rust 1.99.1 toolchain is acceptable.** `rust-toolchain.toml` pins it, matching the
@@ -290,11 +320,10 @@ without them is recorded here.
 - **B06 — Packaging, signing, release (P17/P20).** Needs signing identities and store accounts.
   Resume with `cargo-bundle`/MSIX/notarization as chosen by the user; the window icon is already
   embedded from the approved PNG.
-- **B08 — Excalidraw UI scoping report.** The delegated browser-scoping subagent (OpenCode,
-  DeepSeek, browse MCP) was launched but returned no report and left no artifact or log. The Rune
-  UI was therefore built from the user's description, the PRD, and general product knowledge of
-  Excalidraw's floating-island layout. Resume by re-running the scoping pass and applying any
-  typography, iconography or interaction-state refinements it surfaces.
+- **B08 — Excalidraw UI scoping report.** Resolved 2026-11-16: the delegated OpenCode / DeepSeek
+  run returned a full report, saved at
+  [`docs/reference/excalidraw-ui-spec.md`](docs/reference/excalidraw-ui-spec.md). It confirmed the
+  toolbar arrangement and supplied the token, geometry, icon and typography data now being applied.
 - **B07 — PR / release publication.** Checkpoints are pushed to `main` on
   `https://github.com/asterxsk/doodleverse` under explicit authorization. No pull request or
   release was created. Resume with a PR/branch review or a tagged release if desired.

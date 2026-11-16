@@ -23,7 +23,12 @@ fn main() {
         log::warn!("app icon rejected: {error}");
     }
 
-    let mut spec = AppSpec::new("Doodleverse", (1180.0, 760.0), DoodleApp::new, view::view);
+    let mut spec = AppSpec::new(
+        "Doodleverse",
+        (app::INITIAL_WINDOW_SIZE[0], app::INITIAL_WINDOW_SIZE[1]),
+        DoodleApp::new,
+        view::view,
+    );
     spec.min_size = Some((880.0, 600.0));
     spec.poll = Some(app::poll);
     spec.on_key = Some(app::key_event);

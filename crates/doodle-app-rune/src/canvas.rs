@@ -413,6 +413,7 @@ pub fn statement_texts(s: &DoodleApp, pal: &Palette) -> Vec<El> {
         }
         texts.push(
             rune::text(statement.text.clone())
+                .key(format!("statement-text-{}", projected.object.id))
                 .font(rune::TextStyle::new(font, 500.0))
                 .color(pal.statement_ink)
                 .absolute(screen.x as f32 + 12.0, screen.y as f32 + 10.0)

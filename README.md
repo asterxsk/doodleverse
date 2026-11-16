@@ -5,7 +5,8 @@ portable boards, and a small offline AI sketch partner named Dibby — no accoun
 cloud, no autosave.
 
 The interface now runs on [Rune](https://github.com/anomalyco/rune), anomalyco's Rust UI
-library, with an Excalidraw-style floating toolbox and Miro-style board theming. The
+library. The chrome follows Excalidraw's arrangement — a centred horizontal toolbar, a board
+menu top left, and a three-dot menu top right — while board theming stays Miro-style. The
 original eframe/egui shell stays in the workspace as a second front end over the same core.
 
 ![Doodleverse on Rune](docs/images/rune-window.png)
@@ -21,8 +22,9 @@ original eframe/egui shell stays in the workspace as a second front end over the
   select all, and command-level undo/redo that never records remote CRDT edits.
 - **Board theming** with presets and custom colors, grid spacing/opacity/color, dot/plus
   size and line width.
-- **Floating Excalidraw-style toolbox** over the canvas, with `Alt+Z` zen mode that hides
-  the chrome and leaves only the board.
+- **Excalidraw-style top toolbar** with icon tools (`B` brush, `V` select, `H` hand), brush
+  size, colour swatches and undo/redo, a board menu top left, and a three-dot menu top right
+  for group, fit, canvas settings, help and `Alt+Z` zen mode.
 - **Portable files.** `.doodleverse` export uses a versioned envelope with CRC validation.
   Import validates the whole payload, remaps every identity, and places the board at the
   origin (empty canvas) or as a validated ghost preview (non-empty canvas).

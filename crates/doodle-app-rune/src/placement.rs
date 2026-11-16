@@ -38,17 +38,36 @@ pub fn next_order_key(projection: &BoardProjection) -> i64 {
         .saturating_add(16)
 }
 
+/// Natural width of a pinned answer's note and the style its text is laid out with. The style
+/// matches `canvas::statement_texts`, so the measured height is the height the board actually
+/// draws.
+pub const STATEMENT_WIDTH: f32 = 340.0;
+const STATEMENT_TEXT: rune::TextStyle = rune::TextStyle::new(14.0, 500.0);
+/// The statement's text starts 12 pt in and 10 pt down, and its box adds the same 10 pt at the
+/// bottom; 24 pt of the width is that horizontal inset.
+const STATEMENT_INSET_X: f32 = 24.0;
+const STATEMENT_INSET_Y: f32 = 20.0;
+const STATEMENT_MIN_HEIGHT: f64 = 96.0;
+pub const STATEMENT_MAX_HEIGHT: f64 = 520.0;
+
+/// A pinned answer is sized to its wrapped text plus the box's padding, so a short answer is a
+/// small note rather than a tall card with an empty footer. Long answers stay clamped, as before.
 pub fn statement_size(text: &str) -> (f64, f64) {
-    let chars_per_line = 42usize;
-    let mut lines = 1usize;
-    for line in text.lines() {
-        let count = line.chars().count().max(1);
-        lines += count.div_ceil(chars_per_line).saturating_sub(1);
-        if line.is_empty() {
-            lines += 1;
-        }
-    }
-    let extra_breaks = text.matches('\n').count();
-    let height = 64.0 + (lines + extra_breaks) as f64 * 19.0;
-    (340.0, height.clamp(96.0, 520.0))
+    statement_size_at(text, STATEMENT_WIDTH)
+}
+
+/// The note's size when its text wraps at `width`. The pin placement narrows the note when no
+/// side of the card has room for the natural width, re-measuring so the text still fits.
+pub fn statement_size_at(text: &str, width: f32) -> (f64, f64) {
+    let natural = statement_natural_height(text, width);
+    let height = natural.clamp(STATEMENT_MIN_HEIGHT, STATEMENT_MAX_HEIGHT);
+    (f64::from(width), height)
+}
+
+/// The height `text` needs at `width` before the min/max clamp. A width whose text overflows the
+/// clamp would be drawn clipped, so the placement rejects it instead of pinning a cut-off note.
+pub fn statement_natural_height(text: &str, width: f32) -> f64 {
+    let (_, text_height) =
+        rune::text::measure(text, &[], STATEMENT_TEXT, Some(width - STATEMENT_INSET_X));
+    f64::from(text_height + STATEMENT_INSET_Y)
 }

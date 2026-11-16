@@ -9,12 +9,21 @@ pub struct Palette {
     pub text: Color,
     pub muted: Color,
     pub accent: Color,
+    /// Ink on a filled accent surface (the spec's on-primary); the chrome has no filled primary
+    /// button yet, so it is kept for when one lands.
+    #[allow(dead_code)]
     pub accent_ink: Color,
     pub danger: Color,
     pub selection: Color,
     pub hover: Color,
     pub press: Color,
+    pub selected_bg: Color,
+    pub selected_ink: Color,
+    /// Ring around the selected colour swatch: the spec's `#4a47b1`, since `selected_ink` reads
+    /// as the swatch itself on dark inks.
+    pub swatch_ring: Color,
     pub shadow: Color,
+    pub scrim: Color,
     pub statement_ink: Color,
 }
 
@@ -39,34 +48,42 @@ fn linear(value: u8) -> f32 {
 pub fn palette(light: bool) -> Palette {
     if light {
         Palette {
-            bg: color([250, 248, 243, 255]),
-            card: color([255, 253, 248, 255]),
-            border: color([222, 215, 202, 255]),
-            text: color([34, 32, 37, 255]),
-            muted: color([112, 107, 116, 255]),
-            accent: color([222, 108, 85, 255]),
+            bg: color([255, 255, 255, 255]),
+            card: color([255, 255, 255, 255]),
+            border: color([241, 240, 255, 255]),
+            text: color([27, 27, 31, 255]),
+            muted: color([122, 122, 122, 255]),
+            accent: color([105, 101, 219, 255]),
             accent_ink: Color::WHITE,
-            danger: color([180, 56, 48, 255]),
-            selection: color([55, 145, 141, 255]),
-            hover: color([244, 239, 230, 255]),
-            press: color([235, 228, 217, 255]),
-            shadow: color([40, 35, 30, 28]),
+            danger: color([219, 105, 101, 255]),
+            selection: color([105, 101, 219, 255]),
+            hover: color([241, 240, 255, 255]),
+            press: color([227, 226, 254, 255]),
+            selected_bg: color([224, 223, 255, 255]),
+            selected_ink: color([3, 0, 100, 255]),
+            swatch_ring: color([74, 71, 177, 255]),
+            shadow: color([0, 0, 0, 26]),
+            scrim: color([12, 12, 14, 89]),
             statement_ink: color([45, 40, 28, 255]),
         }
     } else {
         Palette {
-            bg: color([24, 23, 28, 255]),
-            card: color([36, 35, 42, 255]),
-            border: color([66, 63, 74, 255]),
-            text: color([238, 234, 227, 255]),
-            muted: color([164, 158, 172, 255]),
-            accent: color([255, 155, 130, 255]),
-            accent_ink: color([34, 20, 16, 255]),
-            danger: color([255, 129, 118, 255]),
-            selection: color([94, 201, 192, 255]),
-            hover: color([48, 46, 55, 255]),
-            press: color([58, 55, 65, 255]),
-            shadow: color([0, 0, 0, 70]),
+            bg: color([18, 18, 18, 255]),
+            card: color([35, 35, 41, 255]),
+            border: color([46, 45, 57, 255]),
+            text: color([227, 227, 232, 255]),
+            muted: color([160, 160, 170, 255]),
+            accent: color([168, 165, 255, 255]),
+            accent_ink: color([35, 35, 41, 255]),
+            danger: color([255, 135, 135, 255]),
+            selection: color([168, 165, 255, 255]),
+            hover: color([46, 45, 57, 255]),
+            press: color([64, 62, 106, 255]),
+            selected_bg: color([64, 62, 106, 255]),
+            selected_ink: color([224, 223, 255, 255]),
+            swatch_ring: color([168, 165, 255, 255]),
+            shadow: color([0, 0, 0, 90]),
+            scrim: color([12, 12, 14, 166]),
             statement_ink: color([45, 40, 28, 255]),
         }
     }
@@ -77,7 +94,7 @@ pub fn body() -> rune::TextStyle {
 }
 
 pub fn caption() -> rune::TextStyle {
-    tok::TextStyle::new(11.0, 500.0)
+    rune::TextStyle::new(12.0, 500.0)
 }
 
 pub fn heading(size: f32) -> rune::TextStyle {
@@ -88,64 +105,107 @@ pub fn heading(size: f32) -> rune::TextStyle {
 pub fn island_col(pal: &Palette) -> El {
     col()
         .hit()
-        .padding(7.0)
-        .radius(14.0)
+        .padding(4.0)
+        .radius(8.0)
         .fill(pal.card)
         .border(1.0, pal.border)
-        .shadow(6.0, 22.0, pal.shadow)
+        .shadow(7.0, 14.0, pal.shadow)
 }
 
 pub fn island(pal: &Palette) -> El {
     el().hit()
-        .padding(7.0)
-        .radius(14.0)
+        .padding(4.0)
+        .radius(8.0)
         .fill(pal.card)
         .border(1.0, pal.border)
-        .shadow(6.0, 22.0, pal.shadow)
+        .shadow(7.0, 14.0, pal.shadow)
 }
 
 pub fn button(key: impl Into<String>, label: &str, pal: &Palette) -> El {
     el().key(key)
-        .padding(9.0)
+        .padding(6.0)
         .radius(8.0)
         .fill(pal.card)
         .hover(pal.hover)
         .press(pal.press)
-        .border(1.0, pal.border)
         .child(
             text(label)
-                .font(tok::TextStyle::new(12.5, 550.0))
+                .font(tok::TextStyle::new(12.0, 600.0))
                 .color(pal.text),
         )
+}
+
+/// Dialog and card action button: [`button`] with the spec's 1pt border. The border is what makes
+/// the button visible on the card fill, so every caller that needs an affordance uses this.
+pub fn outlined_button(key: impl Into<String>, label: &str, pal: &Palette) -> El {
+    button(key, label, pal).border(1.0, pal.border)
 }
 
 pub fn flat_button(key: impl Into<String>, label: &str, pal: &Palette) -> El {
     el().key(key)
         .padding(8.0)
-        .radius(7.0)
+        .radius(8.0)
+        .items_center()
         .hover(pal.hover)
         .press(pal.press)
         .child(
             text(label)
-                .font(tok::TextStyle::new(12.5, 550.0))
+                .font(tok::TextStyle::new(12.0, 600.0))
                 .color(pal.text),
         )
 }
 
+/// A dropdown menu row: 32 tall, radius 6, 14/400.
+pub fn menu_row(key: impl Into<String>, label: &str, pal: &Palette) -> El {
+    el().key(key)
+        .h(32.0)
+        .px(8.0)
+        .radius(6.0)
+        .items_center()
+        .hover(pal.hover)
+        .press(pal.press)
+        .child(
+            text(label)
+                .font(tok::TextStyle::new(14.0, 400.0))
+                .color(pal.text),
+        )
+}
+
+/// A 36×36 toolbar tool box. Add the icon canvas as its child. `checked` carries the selected
+/// tool to assistive technology; Rune reports it as the button's pressed state.
+pub fn tool_button(key: impl Into<String>, selected: bool, pal: &Palette) -> El {
+    el().key(key)
+        .size(36.0, 36.0)
+        .radius(8.0)
+        .items_center()
+        .justify_center()
+        .checked(selected)
+        .fill(if selected {
+            pal.selected_bg
+        } else {
+            Color::TRANSPARENT
+        })
+        .hover(if selected { pal.selected_bg } else { pal.hover })
+        .press(pal.press)
+}
+
 pub fn active_button(key: impl Into<String>, label: &str, active: bool, pal: &Palette) -> El {
-    let fill = if active { pal.accent } else { pal.card };
-    let ink = if active { pal.accent_ink } else { pal.text };
+    let fill = if active { pal.selected_bg } else { pal.card };
+    let ink = if active { pal.selected_ink } else { pal.text };
     el().key(key)
         .padding(8.0)
-        .radius(7.0)
+        .radius(8.0)
         .fill(fill)
-        .hover(if active { pal.accent } else { pal.hover })
+        // The fill shows which option is active; `checked` says the same to assistive
+        // technology (Rune's pressed/toggled state).
+        .checked(active)
+        .hover(pal.hover)
         .press(pal.press)
-        .border(1.0, if active { pal.accent } else { pal.border })
+        .border(1.0, if active { pal.selected_bg } else { pal.border })
         .motion(motion::SNAPPY)
         .child(
             text(label)
-                .font(tok::TextStyle::new(12.5, 600.0))
+                .font(tok::TextStyle::new(12.0, 600.0))
                 .color(ink),
         )
 }
@@ -153,22 +213,28 @@ pub fn active_button(key: impl Into<String>, label: &str, active: bool, pal: &Pa
 pub fn swatch(key: impl Into<String>, rgba: [u8; 4], selected: bool, pal: &Palette) -> El {
     el().key(key)
         .size(22.0, 22.0)
-        .radius(11.0)
+        .radius(4.0)
         .fill(color(rgba))
+        // The raised ring marks the active ink visually; `checked` marks it for readers.
+        .checked(selected)
         .border(
-            if selected { 2.5 } else { 1.0 },
-            if selected { pal.text } else { pal.border },
+            if selected { 2.0 } else { 1.0 },
+            if selected {
+                pal.swatch_ring
+            } else {
+                pal.border
+            },
         )
         .hover(pal.hover)
         .press(pal.press)
 }
 
 pub fn divider_h(pal: &Palette) -> El {
-    el().w_full().h(1.0).fill(pal.border)
+    el().w_full().h(1.0).fill(pal.border).my(6.0)
 }
 
 pub fn divider_v(pal: &Palette) -> El {
-    el().w(1.0).h(24.0).fill(pal.border)
+    el().w(1.0).h(24.0).fill(pal.border).mx(4.0)
 }
 
 pub fn section(title_text: &str, pal: &Palette) -> El {

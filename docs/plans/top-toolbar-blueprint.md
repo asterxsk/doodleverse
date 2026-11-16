@@ -1,7 +1,9 @@
 # Blueprint — Excalidraw-style top bar for the Rune shell
 
-Status: implementation authorized through a dynamic workflow (`rune-top-toolbar`). No prototypes
-requested; testing deferred until the user leaves the computer.
+Status: implemented in `1faf8be` and pushed to `main`. Headless snapshots at 1180×760 and 880×600
+confirm the layout: menu island top-left, centred toolbar, three-dot island top-right, both
+popovers render, no collision at the minimum window width. Ask Dibby and Export leave the menu bar
+below 1160pt as designed.
 
 ## Brief
 

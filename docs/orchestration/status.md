@@ -15,6 +15,8 @@ the build can be called finished. It is not a changelog.
 | Import placement ghost and single-command commit | Done |
 | eframe app shell, floating toolbox, zen mode | Done, screenshot-verified |
 | Rune app shell (`doodleverse-rune`): islands, Excalidraw-style toolbox, zen | Done, headless-screenshot-verified |
+| Rune Excalidraw-style top bar: board menu, centred icon toolbar, three-dot overflow | Done, headless-screenshot-verified |
+| Excalidraw token/icon pass, accessibility semantics, instant popovers | Done, six fresh-tester QA rounds |
 | Rune board theming, settings panel scrolling, dark-board ink | Done, headless-screenshot-verified |
 | Rune file dialogs, export/import, pin flow, AI cards | Done, scripted-dialog-verified |
 | Rune app icon, secondary-monitor placement, clean `WM_CLOSE` | Done, real-window-verified |
@@ -32,8 +34,8 @@ recorded product blockers (transport, providers, packaging).
 
 ## Next
 
-1. Optional: apply the Excalidraw scoping notes to further polish typography, iconography and
-   interaction states once the report arrives.
+1. Optional: a real-window reviewer pass over surfaces a headless script cannot reach — close
+   confirmation buttons, native file dialogs, hardware pen pressure.
 2. Optional: mirror any Rune-only UI fixes back into the eframe shell if it is kept.
 3. Reviewer pass in a real window over the surfaces a headless script cannot reach: close
    confirmation buttons, native file dialogs, hardware pen pressure.

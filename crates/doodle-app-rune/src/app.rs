@@ -16,9 +16,44 @@ use rune::{
 
 pub use crate::cards::{CardUi, PinPreview};
 pub use crate::placement::{
-    board_is_empty, next_order_key, placement_is_valid, placement_rect, placement_translation,
-    statement_size,
+    STATEMENT_MAX_HEIGHT, STATEMENT_WIDTH, board_is_empty, next_order_key, placement_is_valid,
+    placement_rect, placement_translation, statement_natural_height, statement_size,
+    statement_size_at,
 };
+
+/// How long after a popover is dismissed by a pointer press the board ignores presses. It covers
+/// the frame in which the scrim's handler and the board's handler can both see the same press.
+const POPOVER_PRESS_SUPPRESSION: f64 = 0.05;
+
+/// How long after a popover trigger is pressed a board press is treated as part of the same
+/// overlapping gesture. A second pointer going down before the trigger's release would otherwise
+/// draw on the board while the popover is on its way open.
+const POPOVER_TRIGGER_WINDOW: f64 = 0.12;
+
+/// Window-point insets that board content must stay clear of: the menu bar and toolbar along the
+/// top, the status and zoom islands along the bottom, each plus a 12 pt margin.
+pub const CHROME_TOP_INSET: f32 = 66.0;
+pub const CHROME_BOTTOM_INSET: f32 = 61.0;
+
+/// Screen-point margin a pinned note keeps from the window's left and right edges, matching the
+/// margin cards are clamped by. Without it a note pushed to the edge of a narrow, panned board
+/// ends exactly on the window border with nowhere to breathe.
+const BOARD_SCREEN_MARGIN: f64 = 12.0;
+
+/// The window the app opens at. The first view runs before layout has measured anything, so
+/// `DoodleApp::new` starts from this size to place the hint and choose the menu's contents for
+/// the frame it draws; a headless run's `--size` replaces it.
+pub const INITIAL_WINDOW_SIZE: [f32; 2] = [1180.0, 760.0];
+
+/// The size the first view is laid out for. A headless run publishes its `--size` before state
+/// creation, so a snapshot of frame zero matches the viewport; a window opens at the size in
+/// `AppSpec`, which is [`INITIAL_WINDOW_SIZE`].
+fn initial_window_size() -> [f32; 2] {
+    rune::tooling::headless_run().map_or(INITIAL_WINDOW_SIZE, |run| {
+        let (width, height) = run.size();
+        [width, height]
+    })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
@@ -112,6 +147,10 @@ pub struct DoodleApp {
     pub reopen_pending: bool,
     pub menu_open: bool,
     pub overflow_open: bool,
+    /// A press that dismissed a popover (or landed while one was open) must not also start a
+    /// board gesture. A scrim handler can run before the board handler in the same frame, so the
+    /// dismissal leaves this deadline; the next board press inside it is consumed.
+    pub suppress_board_press_until: Option<f64>,
     pub pin_preview: Option<PinPreview>,
     pub canvas_layout: [f32; 4],
     pub window_size: [f32; 2],
@@ -136,6 +175,7 @@ impl DoodleApp {
             total_stroke_points: 0,
             index: std::collections::HashMap::new(),
         });
+        let window_size = initial_window_size();
         Self {
             saved_revision: Some(doc.revision()),
             projection_revision: doc.revision(),
@@ -166,9 +206,10 @@ impl DoodleApp {
             reopen_pending: false,
             menu_open: false,
             overflow_open: false,
+            suppress_board_press_until: None,
             pin_preview: None,
-            canvas_layout: [0.0, 0.0, 960.0, 640.0],
-            window_size: [960.0, 640.0],
+            canvas_layout: [0.0, 0.0, window_size[0], window_size[1]],
+            window_size,
             last_pointer_world: Point::default(),
             hint_visible: true,
             panning: false,
@@ -193,6 +234,35 @@ impl DoodleApp {
 
     pub fn zoom(&self) -> f64 {
         self.camera.zoom.max(doodle_types::MIN_ZOOM)
+    }
+
+    /// A scrim press dismisses the open popover. The press can also have reached the board in the
+    /// same frame (before or after this handler), so the board ignores the next press instead of
+    /// treating it as the start of a stroke.
+    pub fn dismiss_popovers_by_pointer(&mut self) {
+        self.menu_open = false;
+        self.overflow_open = false;
+        self.suppress_board_press_until = Some(self.clock + POPOVER_PRESS_SUPPRESSION);
+    }
+
+    /// The menu and overflow triggers mark their press-down, so a second press that lands before
+    /// they release (two simultaneous taps) is consumed instead of starting a stroke.
+    pub fn popover_trigger_drag(&mut self, drag: &Drag) {
+        if drag.phase == Phase::Down {
+            self.suppress_board_press_until = Some(self.clock + POPOVER_TRIGGER_WINDOW);
+        }
+    }
+
+    fn board_press_is_suppressed(&self) -> bool {
+        self.suppress_board_press_until
+            .is_some_and(|until| self.clock <= until)
+    }
+
+    fn cancel_press_gestures(&mut self) {
+        self.stroke = None;
+        self.drag = None;
+        self.marquee = None;
+        self.panning = false;
     }
 
     pub fn refresh(&mut self) -> bool {
@@ -432,6 +502,40 @@ impl DoodleApp {
         .clamp(0.0, 1.0)
     }
 
+    /// The value a slider announces to assistive technology, in the unit the user sees.
+    pub fn slider_value_text(&self, target: Target) -> String {
+        match target {
+            Target::BrushSize => format!("{:.0} px", self.brush.base_width),
+            Target::Pressure => format!("{:.0}%", self.brush.pressure_sensitivity * 100.0),
+            Target::Smoothing => format!("{:.0}%", self.brush.smoothing * 100.0),
+            Target::TaperStart => format!("{:.0}%", self.brush.taper_start / 0.45 * 100.0),
+            Target::TaperEnd => format!("{:.0}%", self.brush.taper_end / 0.45 * 100.0),
+            Target::GridSpacing => format!("{:.0} px", self.grid.spacing),
+            Target::GridOpacity => format!("{:.0}%", self.grid.opacity.clamp(0.0, 1.0) * 100.0),
+            Target::GridMarkSize => format!("{:.1} px", self.grid.mark_size),
+            Target::GridLineWidth => format!("{:.1} px", self.grid.line_width),
+            Target::CustomBoardRed
+            | Target::CustomBoardGreen
+            | Target::CustomBoardBlue
+            | Target::CustomGridRed
+            | Target::CustomGridGreen
+            | Target::CustomGridBlue => {
+                let channel = match target {
+                    Target::CustomBoardRed | Target::CustomGridRed => 0,
+                    Target::CustomBoardGreen | Target::CustomGridGreen => 1,
+                    _ => 2,
+                };
+                let rgba = match target {
+                    Target::CustomBoardRed | Target::CustomBoardGreen | Target::CustomBoardBlue => {
+                        self.grid.background_rgba
+                    }
+                    _ => self.grid.line_rgba,
+                };
+                format!("{} of 255", rgba[channel])
+            }
+        }
+    }
+
     pub fn apply_board_preset(&mut self, background: [u8; 4], lines: [u8; 4], light: bool) {
         self.grid.background_rgba = background;
         self.grid.line_rgba = lines;
@@ -642,11 +746,23 @@ impl DoodleApp {
 
     pub fn confirm_pin(&mut self, card_id: u64) {
         let zoom = self.zoom();
-        let Some(card) = self
-            .cards
-            .iter_mut()
-            .find(|card| card.card.local_id == card_id)
-        else {
+        let viewport = self.viewport();
+        // Keep the note in the board area the chrome leaves free: clear of the menu bar and
+        // toolbar on top, the status and zoom islands at the bottom, and the same 12 pt side
+        // margin cards are clamped by, so a note never lands on the window edge.
+        let top = f64::from(CHROME_TOP_INSET);
+        let bottom = f64::from(CHROME_BOTTOM_INSET);
+        let board_min = self
+            .camera
+            .screen_to_world(Point::new(BOARD_SCREEN_MARGIN, top), viewport);
+        let board_max = self.camera.screen_to_world(
+            Point::new(
+                (viewport.width() - BOARD_SCREEN_MARGIN).max(BOARD_SCREEN_MARGIN),
+                (viewport.height() - bottom).max(top),
+            ),
+            viewport,
+        );
+        let Some(card) = self.cards.iter().find(|card| card.card.local_id == card_id) else {
             self.pin_preview = None;
             return;
         };
@@ -654,17 +770,107 @@ impl DoodleApp {
             self.pin_preview = None;
             return;
         };
-        let (width, height) = statement_size(&text);
+        let free_height = board_max.y - board_min.y;
+        // Place the note against the card's visible rect, not its world position: a card pushed
+        // back inside the window by the clamp still sits where the user sees it. Right, left,
+        // above and below are tried in that order, each clamped on screen; the first that stays
+        // on the board and clear of the card wins.
+        let layout = crate::cards::card_layout(self, card);
+        let card_min = self.camera.screen_to_world(
+            Point::new(f64::from(layout.x), f64::from(layout.y)),
+            viewport,
+        );
+        let card_max = self.camera.screen_to_world(
+            Point::new(
+                f64::from(layout.x + layout.width),
+                f64::from(layout.y + layout.height),
+            ),
+            viewport,
+        );
+        let card_rect = Rect::new(card_min.x, card_min.y, card_max.x, card_max.y);
+        let margin = 24.0 / zoom;
+        let right_margin = 48.0 / zoom;
+        let candidates_for = |width: f64, height: f64| {
+            let max_x = (board_max.x - width).max(board_min.x);
+            let max_y = (board_max.y - height).max(board_min.y);
+            let clamp_x = |x: f64| x.clamp(board_min.x, max_x);
+            let clamp_y = |y: f64| y.clamp(board_min.y, max_y);
+            [
+                (
+                    clamp_x(card_rect.max_x + right_margin),
+                    clamp_y(card_rect.min_y),
+                ),
+                (
+                    clamp_x(card_rect.min_x - margin - width),
+                    clamp_y(card_rect.min_y),
+                ),
+                (
+                    clamp_x(card_rect.min_x),
+                    clamp_y(card_rect.min_y - margin - height),
+                ),
+                (clamp_x(card_rect.min_x), clamp_y(card_rect.max_y + margin)),
+            ]
+        };
+        let place = |width: f64, height: f64| -> Option<Rect> {
+            candidates_for(width, height)
+                .into_iter()
+                .map(|(x, y)| Rect::new(x, y, x + width, y + height))
+                .find(|rect| overlap_area(*rect, card_rect) <= 0.0)
+        };
+        // A card that fills most of a small viewport leaves no side wide enough for the natural
+        // note. Narrower widths are tried in turn; each re-wraps the text, and a width whose text
+        // would be clipped by the height clamp or the free board area is skipped. Only when even
+        // the narrowest width cannot fit does the note fall back to least overlap.
+        let mut fitting = None;
+        for width in [STATEMENT_WIDTH, 300.0, 260.0, 220.0, 200.0] {
+            let natural_height = statement_natural_height(&text, width);
+            if natural_height > STATEMENT_MAX_HEIGHT || natural_height > free_height {
+                continue;
+            }
+            let (candidate_width, candidate_height) = statement_size_at(&text, width);
+            if let Some(rect) = place(candidate_width, candidate_height) {
+                fitting = Some((candidate_width, candidate_height, rect));
+                break;
+            }
+        }
+        let (width, height, chosen) = match fitting {
+            Some((width, height, rect)) => (width, height, rect),
+            None => {
+                // A very long answer cannot be taller than the free board area, or its lower body
+                // would sit under the status island however it is placed.
+                let (width, mut height) = statement_size(&text);
+                if height > free_height {
+                    height = free_height.max(96.0);
+                }
+                let mut chosen = Rect::new(0.0, 0.0, 0.0, 0.0);
+                let mut best_overlap = f64::INFINITY;
+                for (x, y) in candidates_for(width, height) {
+                    let rect = Rect::new(x, y, x + width, y + height);
+                    let overlap = overlap_area(rect, card_rect);
+                    if overlap < best_overlap {
+                        best_overlap = overlap;
+                        chosen = rect;
+                    }
+                }
+                (width, height, chosen)
+            }
+        };
         let statement = StatementObject {
             text,
             width,
             height,
             style: StatementStyle::default(),
         };
-        let pose = Pose::new(card.card.world_pos.x + 384.0 / zoom, card.card.world_pos.y);
+        let pose = Pose::new(chosen.min_x, chosen.min_y);
         match self.doc.create_statement(pose, statement) {
             Ok(_) => {
-                card.pinned = true;
+                if let Some(card) = self
+                    .cards
+                    .iter_mut()
+                    .find(|card| card.card.local_id == card_id)
+                {
+                    card.pinned = true;
+                }
                 self.pin_preview = None;
                 self.refresh();
                 self.set_notice(NoticeKind::Info, "Answer pinned to the board");
@@ -676,7 +882,7 @@ impl DoodleApp {
         }
     }
 
-    pub fn poll_cards(&mut self) -> bool {
+    pub fn poll_cards(&mut self, tx: &mut Tx) -> bool {
         let mut changed = false;
         let now = self.clock;
         let reduced_motion = self.reduced_motion;
@@ -689,7 +895,15 @@ impl DoodleApp {
                 card.mark_changed(now);
                 changed = true;
             }
-            if !card.card.is_busy() {
+            let busy = card.card.is_busy();
+            if busy != card.was_busy {
+                card.was_busy = busy;
+                // Streaming follows the bottom of the answer. A finished answer would otherwise
+                // stay parked at its last line, so both ends of a generation jump the viewport
+                // back to the first line.
+                tx.scroll_to_y(format!("card-answer-scroll-{}", card.card.local_id), 0.0);
+            }
+            if !busy {
                 card.busy_started = None;
             }
         }
@@ -812,6 +1026,27 @@ impl DoodleApp {
     }
 
     fn begin_press(&mut self, drag: &Drag, world: Point) {
+        // A press that dismisses a popover must not also start a board gesture. The scrim covers
+        // the board, but in the frame it mounts its hit box can still be smaller than the window,
+        // so the press can reach the canvas first; consume it here as the scrim would.
+        if self.menu_open || self.overflow_open {
+            self.dismiss_popovers_by_pointer();
+            self.cancel_press_gestures();
+            return;
+        }
+        // The scrim's own handler may have run first this frame and already dismissed the
+        // popover. The dismissal leaves a short deadline, and this press is still the one that
+        // did it, so it is consumed here rather than starting a stroke.
+        if self.board_press_is_suppressed() {
+            self.suppress_board_press_until = None;
+            self.cancel_press_gestures();
+            return;
+        }
+        // The same guard for a modal dialog: its scrim takes the press with a no-op handler, and
+        // until that scrim has landed no stroke may start beneath it.
+        if self.show_close_confirm || self.pin_preview.is_some() {
+            return;
+        }
         if self.pending_import.is_some() {
             self.commit_pending_import();
             return;
@@ -895,6 +1130,18 @@ impl DoodleApp {
     }
 
     fn finish_press(&mut self, drag: &Drag, world: Point) {
+        // A press that began while a popover was open, that dismissed one, or that was still held
+        // when a popover opened (a tap begun just before the previous tap's release) is consumed:
+        // it can never commit a stroke. Closing the popover here also makes a tap outside it
+        // dismiss it, as the scrim would have.
+        let popover_open = self.menu_open || self.overflow_open;
+        if popover_open || self.board_press_is_suppressed() {
+            self.menu_open = false;
+            self.overflow_open = false;
+            self.suppress_board_press_until = None;
+            self.cancel_press_gestures();
+            return;
+        }
         if self.panning {
             self.panning = false;
             return;
@@ -1037,6 +1284,13 @@ impl DoodleApp {
     }
 }
 
+/// Area two rects share; zero when they only touch or do not meet.
+fn overlap_area(a: Rect, b: Rect) -> f64 {
+    let width = (a.max_x.min(b.max_x) - a.min_x.max(b.min_x)).max(0.0);
+    let height = (a.max_y.min(b.max_y) - a.min_y.max(b.min_y)).max(0.0);
+    width * height
+}
+
 pub fn on_modifiers(state: &mut DoodleApp, mods: Mods, _tx: &mut Tx) {
     state.mods = mods;
 }
@@ -1045,7 +1299,7 @@ pub fn poll(state: &mut DoodleApp, t: f64, tx: &mut Tx) -> bool {
     state.clock = t;
     state.reload_handle();
     let refreshed = state.refresh();
-    let cards = state.poll_cards();
+    let cards = state.poll_cards(tx);
     let animating = state.any_card_busy()
         || state.stroke.is_some()
         || state.drag.is_some()
@@ -1127,11 +1381,30 @@ pub fn key_event(state: &mut DoodleApp, ev: &KeyEvent, tx: &mut Tx) -> bool {
             true
         }
         Key::Escape => {
+            // Cancel any in-flight gesture, then close the topmost open overlay. The pin and
+            // close dialogs own Escape first; the popovers follow, then the panels, then zen.
+            let dialog_open = state.show_close_confirm || state.pin_preview.is_some();
             state.cancel_gestures();
-            state.show_close_confirm = false;
-            state.pin_preview = None;
-            state.menu_open = false;
-            state.overflow_open = false;
+            if dialog_open {
+                state.show_close_confirm = false;
+                // When Rune's modal trap did not take the Escape first (nothing was focused
+                // inside it), retiring the dialog here is still a key dismissal: return to
+                // its Pin button with the keyboard ring, not the pointer's ringless restore.
+                if let Some(preview) = state.pin_preview.take() {
+                    let ring = tx.by_keys() || tx.focus_visible();
+                    tx.focus(format!("card-pin-{}", preview.card_id), ring);
+                }
+            } else if state.overflow_open {
+                state.overflow_open = false;
+            } else if state.menu_open {
+                state.menu_open = false;
+            } else if state.show_help {
+                state.show_help = false;
+            } else if state.show_settings {
+                state.show_settings = false;
+            } else if state.zen {
+                state.zen = false;
+            }
             true
         }
         Key::Function(1) => {

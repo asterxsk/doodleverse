@@ -101,6 +101,41 @@ The same binary embeds `assets/app-icon.png` through `rune::set_app_icon`, which
 Windows title-bar, taskbar and Alt-Tab icon that the first Rune builds were missing.
 
 
+## Excalidraw chrome, tokens and QA rounds
+
+The top-bar redesign and the token/icon pass were driven headlessly at 1180×760 and 880×600 in
+light and dark, then tested by nine independent fresh-subagent QA rounds. After each round a
+separate implementer fixed the confirmed findings and a new tester re-ran the app.
+
+| Area | Result |
+| --- | --- |
+| Top bar: menu island top left, centred horizontal toolbar, three-dot overflow top right | Verified at both sizes; no overlap; Ask Dibby and Export move into the overflow below 1160pt |
+| Tokens: indigo accent, radius-8 islands, 36×36 tool boxes, 22×22 swatches, `#121212` dark canvas | Verified in light and dark screenshots |
+| Menu and overflow popovers mount and unmount instantly; scrim and Escape dismiss | Verified; no ghost rows one frame after dismissal |
+| Settings panel scroll with sticky header and close; help panel sticky header and Escape | Verified at 880×600 |
+| Canvas wheel pan over the empty-board hint; wheel over panels scrolls them, not the board | Verified |
+| AI card with wrapped long question: card inside the window, footer clickable, answer scrolls fully | Verified at both sizes |
+| Pinned answers: note sized to its text, clear of chrome, never under the card | Verified for short and long answers, panned and unpanned |
+| Presses that open or dismiss a popover never start a canvas stroke | Verified at 0.02–0.1s delays and a normal tap still draws one stroke |
+| Chrome stays fixed when a card opens or closes | Verified by matching island bounds at 0.15s and 0.3s |
+| Accessibility: checked states, slider role/value/actions, named and disabled buttons, dialog roles, scrims hidden | Verified in the element tree |
+| Pin and close dialogs trap Tab/Enter, hide the background from accessibility, and restore focus with a visible ring | Verified for the pin dialog; the close dialog shares the code but cannot be raised headlessly |
+| Disclosure buttons report expanded/collapsed; disabled buttons consume presses instead of drawing | Verified |
+| First frame matches the viewport; completed answers start at their first line | Verified |
+| Dark theme strokes, undo/redo, counts, group/ungroup, zen | Verified |
+
+Defects found and fixed across the rounds: answer text clipped and not scrollable, pinned note
+off-screen and later overlapping the card, Export unreachable below 1160pt, missing names and
+states on swatches/sliders/buttons, help Close below the fold, Escape not closing overlays, card
+overflow at 880×600, "1 objects" grammar, first-frame press leak, chrome remount animation,
+fading popover ghosts, wheel dead over the empty-board hint, and oversized pinned notes.
+
+Known residuals: an extremely long pinned answer narrowed to 200pt can still exceed the free board
+height and falls back to the least-overlapping placement; a group container counts as one object
+in the status line (two strokes grouped report three objects). The release build was launched in a
+real window after the token pass: title bar and taskbar icon present, top bar and islands render as
+in the headless frames, and `WM_CLOSE` on an empty board exits the process cleanly.
+
 ## Known verification gaps
 
 - **Hardware pen pressure** cannot be verified without a tablet. The Windows pointer probe compiles
