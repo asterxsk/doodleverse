@@ -7,11 +7,12 @@ use doodle_canvas::{BrushSettings, Camera, RawSample, StrokeBuilder};
 use doodle_document::{BoardDocument, BoardProjection};
 use doodle_render::{GridKind, GridSettings};
 use doodle_types::{
-    MAX_IMPORT_BYTES, ObjectId, ObjectKind, Point, Pose, Rect, StatementObject, StatementStyle,
-    StrokeGeometry, StrokeStyle,
+    MAX_IMPORT_BYTES, MIN_SHAPE_SIZE, ObjectId, ObjectKind, Point, Pose, Rect, ShapeKind,
+    ShapeObject, StatementKind, StatementObject, StatementStyle, StrokeGeometry, StrokeStyle,
 };
 use rune::{
-    AppHandle, Drag, FileDialogOptions, Key, KeyEvent, MagnifyEvent, Mods, Phase, Tx, WheelEvent,
+    AppHandle, Drag, FileDialogOptions, Key, KeyEvent, MagnifyEvent, Mods, Phase, PointerButton,
+    Tx, WheelEvent,
 };
 
 pub use crate::cards::{CardUi, PinPreview};
@@ -31,9 +32,28 @@ const POPOVER_PRESS_SUPPRESSION: f64 = 0.05;
 const POPOVER_TRIGGER_WINDOW: f64 = 0.12;
 
 /// Window-point insets that board content must stay clear of: the menu bar and toolbar along the
-/// top, the status and zoom islands along the bottom, each plus a 12 pt margin.
-pub const CHROME_TOP_INSET: f32 = 66.0;
+/// top, plus the brush pill below the toolbar, the bottom-left cluster along the bottom, each plus
+/// a 12 pt margin.
+pub const CHROME_TOP_INSET: f32 = 106.0;
 pub const CHROME_BOTTOM_INSET: f32 = 61.0;
+
+/// Bottom-left controls. The minimap sits 12 pt above the cluster and is 200×140.
+pub const MINIMAP_WIDTH: f32 = 200.0;
+pub const MINIMAP_HEIGHT: f32 = 140.0;
+/// Inset of the minimap's board drawing from its panel edge, so object strokes stay readable.
+const MINIMAP_PAD: f64 = 8.0;
+/// The bottom-left cluster's height and its distance from the window's bottom edge.
+const CLUSTER_HEIGHT: f32 = 36.0;
+const CLUSTER_BOTTOM: f32 = 10.0;
+
+/// Sticky notes are a fixed note; text blocks measure their width between these bounds.
+const STICKY_WIDTH: f64 = 240.0;
+const STICKY_HEIGHT: f64 = 160.0;
+const TEXT_MIN_WIDTH: f64 = 120.0;
+const TEXT_MAX_WIDTH: f64 = 320.0;
+const TEXT_MIN_HEIGHT: f64 = 30.0;
+/// The style a statement's text is laid out with on the board (`canvas::statement_texts` at 100%).
+const STATEMENT_TEXT_STYLE: rune::TextStyle = rune::TextStyle::new(14.0, 500.0);
 
 /// Screen-point margin a pinned note keeps from the window's left and right edges, matching the
 /// margin cards are clamped by. Without it a note pushed to the edge of a narrow, panned board
@@ -60,7 +80,79 @@ pub enum Tool {
     Draw,
     Select,
     Hand,
+    Rectangle,
+    Diamond,
+    Ellipse,
+    Arrow,
+    Line,
+    Text,
+    Sticky,
+    Eraser,
 }
+
+impl Tool {
+    /// The shape a drag with this tool commits, if it draws one.
+    pub fn shape_kind(self) -> Option<ShapeKind> {
+        match self {
+            Self::Rectangle => Some(ShapeKind::Rectangle),
+            Self::Diamond => Some(ShapeKind::Diamond),
+            Self::Ellipse => Some(ShapeKind::Ellipse),
+            Self::Arrow => Some(ShapeKind::Arrow),
+            Self::Line => Some(ShapeKind::Line),
+            _ => None,
+        }
+    }
+
+    /// Whether a click with this tool opens the inline text/sticky editor.
+    pub fn statement_kind(self) -> Option<StatementKind> {
+        match self {
+            Self::Text => Some(StatementKind::Text),
+            Self::Sticky => Some(StatementKind::Sticky),
+            _ => None,
+        }
+    }
+}
+
+/// A shape drag in world space. The preview is drawn from it and the release commits one
+/// `CreateShape`; nothing reaches the document before the release.
+pub struct ShapeDrag {
+    pub kind: ShapeKind,
+    pub start: Point,
+    pub current: Point,
+}
+
+/// An inline text or sticky editor, anchored at the world point it was opened on.
+pub struct InlineEditor {
+    pub kind: StatementKind,
+    pub world: Point,
+}
+
+/// Board-to-minimap projection: the board extent's centre and its scale into the panel.
+pub struct MinimapMap {
+    pub center: Point,
+    pub scale: f64,
+}
+
+impl MinimapMap {
+    pub fn to_local(&self, world: Point) -> [f32; 2] {
+        [
+            MINIMAP_WIDTH * 0.5 + ((world.x - self.center.x) * self.scale) as f32,
+            MINIMAP_HEIGHT * 0.5 + ((world.y - self.center.y) * self.scale) as f32,
+        ]
+    }
+}
+
+/// A whole-object erase drag. Objects are collected in world space and removed as one batch
+/// when the drag ends, so the whole gesture is a single undo step. Until then the board skips
+/// them, which shows the erase live without touching the document.
+pub struct EraseGesture {
+    pub removed: BTreeSet<ObjectId>,
+    pub last: Point,
+}
+
+/// Screen-point radius of the eraser. Converted to world points at the current zoom, so the
+/// pointer erases the same amount of board at every zoom.
+pub const ERASER_RADIUS: f64 = 6.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoticeKind {
@@ -132,6 +224,12 @@ pub struct DoodleApp {
     pub stroke: Option<StrokeGesture>,
     pub drag: Option<SelectDrag>,
     pub marquee: Option<Marquee>,
+    pub erasing: Option<EraseGesture>,
+    pub shape_drag: Option<ShapeDrag>,
+    pub editor: Option<InlineEditor>,
+    pub editor_edit: rune::TextEdit,
+    pub toolbar_locked: bool,
+    pub minimap_open: bool,
     pub pending_import: Option<PendingImport>,
     pub cards: Vec<CardUi>,
     pub next_card_id: u64,
@@ -155,6 +253,13 @@ pub struct DoodleApp {
     pub canvas_layout: [f32; 4],
     pub window_size: [f32; 2],
     pub last_pointer_world: Point,
+    /// The pointer in canvas-local screen points, for the eraser feedback that the canvas
+    /// draws itself (the OS cursor is hidden under the eraser tool).
+    pub pointer_screen: Option<[f32; 2]>,
+    /// Whether the pointer is over the board rather than the chrome over it.
+    pub pointer_on_canvas: bool,
+    /// Smoothed direction of the pointer's recent board movement, for the eraser tail.
+    pub eraser_trail_dir: Option<[f32; 2]>,
     pub hint_visible: bool,
     pub panning: bool,
     pub pan_last: [f32; 2],
@@ -192,6 +297,12 @@ impl DoodleApp {
             stroke: None,
             drag: None,
             marquee: None,
+            erasing: None,
+            shape_drag: None,
+            editor: None,
+            editor_edit: rune::TextEdit::new(""),
+            toolbar_locked: false,
+            minimap_open: false,
             pending_import: None,
             cards: Vec::new(),
             next_card_id: 1,
@@ -211,6 +322,9 @@ impl DoodleApp {
             canvas_layout: [0.0, 0.0, window_size[0], window_size[1]],
             window_size,
             last_pointer_world: Point::default(),
+            pointer_screen: None,
+            pointer_on_canvas: false,
+            eraser_trail_dir: None,
             hint_visible: true,
             panning: false,
             pan_last: [0.0, 0.0],
@@ -262,6 +376,8 @@ impl DoodleApp {
         self.stroke = None;
         self.drag = None;
         self.marquee = None;
+        self.erasing = None;
+        self.shape_drag = None;
         self.panning = false;
     }
 
@@ -453,9 +569,177 @@ impl DoodleApp {
         self.stroke = None;
         self.drag = None;
         self.marquee = None;
+        self.erasing = None;
+        self.shape_drag = None;
         self.panning = false;
         self.pin_preview = None;
+        self.cancel_editor();
         self.cancel_pending_import();
+    }
+
+    /// Switches the active tool. Every in-flight board gesture belongs to the previous tool, so
+    /// they are dropped rather than committed under the new one. An open inline editor is
+    /// committed, as pressing a tool away from it finishes what was typed.
+    pub fn set_tool(&mut self, tool: Tool) {
+        self.commit_editor();
+        self.tool = tool;
+        // A stale direction would make the eraser tail point where the previous tool moved, so
+        // the next pointer move only re-establishes the position.
+        self.eraser_trail_dir = None;
+        self.pointer_screen = None;
+        self.cancel_press_gestures();
+    }
+
+    // ---- shapes and inline text ------------------------------------------------------------
+
+    /// The shape the current drag would commit, or `None` when no shape tool is dragging, the
+    /// drag is too small to mean anything, or the constrained box would be empty.
+    pub fn shape_preview(&self) -> Option<(ShapeObject, Pose)> {
+        let drag = self.shape_drag.as_ref()?;
+        let mut dx = drag.current.x - drag.start.x;
+        let mut dy = drag.current.y - drag.start.y;
+        if (dx.hypot(dy) * self.zoom()) < 4.0 {
+            return None;
+        }
+        if self.mods.shift {
+            let side = dx.abs().max(dy.abs());
+            dx = side.copysign(if dx < 0.0 { -1.0 } else { 1.0 });
+            dy = side.copysign(if dy < 0.0 { -1.0 } else { 1.0 });
+        }
+        let pose = Pose::new(drag.start.x + dx.min(0.0), drag.start.y + dy.min(0.0));
+        // Open paths may be zero-extent on one axis, so a perfectly horizontal or vertical line
+        // keeps its true size instead of growing a 1pt box. Only they carry direction flags:
+        // closed shapes are defined by the pose corner alone.
+        let open = drag.kind.is_open();
+        let min_size = if open { 0.0 } else { MIN_SHAPE_SIZE };
+        let shape = ShapeObject {
+            shape: drag.kind,
+            width: dx.abs().max(min_size),
+            height: dy.abs().max(min_size),
+            style: self.brush.style(self.color),
+            flip_x: open && dx < 0.0,
+            flip_y: open && dy < 0.0,
+        };
+        Some((shape, pose))
+    }
+
+    /// Commits the drag as one `CreateShape`, so a single undo removes it.
+    pub fn commit_shape(&mut self) {
+        if self.shape_drag.is_none() {
+            return;
+        }
+        let preview = self.shape_preview();
+        self.shape_drag = None;
+        let Some((shape, pose)) = preview else {
+            return;
+        };
+        match self.doc.create_shape(pose, shape) {
+            Ok(_) => {
+                self.hint_visible = false;
+                self.refresh();
+            }
+            Err(error) => self.set_notice(NoticeKind::Error, format!("Shape rejected: {error}")),
+        }
+    }
+
+    pub fn open_editor(&mut self, kind: StatementKind, world: Point) {
+        self.editor_edit = rune::TextEdit::new("");
+        self.editor = Some(InlineEditor { kind, world });
+    }
+
+    /// Enter: an empty editor closes without creating anything; otherwise the text becomes a
+    /// `Text` or `Sticky` statement at the point the editor was opened on.
+    pub fn commit_editor(&mut self) {
+        let Some(editor) = self.editor.take() else {
+            return;
+        };
+        let text = self.editor_edit.text.trim().to_owned();
+        self.editor_edit = rune::TextEdit::new("");
+        if text.is_empty() {
+            return;
+        }
+        let (width, height) = match editor.kind {
+            StatementKind::Sticky => (STICKY_WIDTH, STICKY_HEIGHT),
+            StatementKind::Text => {
+                let (natural, _) = rune::text::measure(&text, &[], STATEMENT_TEXT_STYLE, None);
+                let width = f64::from(natural).clamp(TEXT_MIN_WIDTH, TEXT_MAX_WIDTH);
+                let (_, wrapped) =
+                    rune::text::measure(&text, &[], STATEMENT_TEXT_STYLE, Some(width as f32));
+                (width, f64::from(wrapped).max(TEXT_MIN_HEIGHT))
+            }
+        };
+        let statement = StatementObject {
+            text,
+            width,
+            height,
+            style: StatementStyle::default(),
+            kind: editor.kind,
+        };
+        let pose = Pose::new(editor.world.x, editor.world.y);
+        match self.doc.create_statement(pose, statement) {
+            Ok(_) => {
+                self.hint_visible = false;
+                self.refresh();
+            }
+            Err(error) => self.set_notice(NoticeKind::Error, format!("Text rejected: {error}")),
+        }
+    }
+
+    /// Escape drops the editor and whatever was typed, creating nothing.
+    pub fn cancel_editor(&mut self) {
+        if self.editor.take().is_some() {
+            self.editor_edit = rune::TextEdit::new("");
+        }
+    }
+
+    // ---- minimap ---------------------------------------------------------------------------
+
+    /// The minimap's window rect, 12 pt above the bottom-left cluster.
+    pub fn minimap_rect(&self) -> [f32; 4] {
+        let top = self.window_size[1] - CLUSTER_BOTTOM - CLUSTER_HEIGHT - 12.0 - MINIMAP_HEIGHT;
+        [12.0, top, MINIMAP_WIDTH, MINIMAP_HEIGHT]
+    }
+
+    /// Mapping between the board and the minimap's local points: board content and the visible
+    /// viewport together, letterboxed inside the panel with an 8 pt inset.
+    pub fn minimap_map(&self) -> MinimapMap {
+        let visible = self.camera.visible_world(self.viewport());
+        let extent = self
+            .projection
+            .content_bounds()
+            .map_or(visible, |bounds| bounds.union(visible));
+        let usable_w = (f64::from(MINIMAP_WIDTH) - MINIMAP_PAD * 2.0).max(1.0);
+        let usable_h = (f64::from(MINIMAP_HEIGHT) - MINIMAP_PAD * 2.0).max(1.0);
+        let scale = (usable_w / extent.width().max(1.0)).min(usable_h / extent.height().max(1.0));
+        MinimapMap {
+            center: extent.center(),
+            scale,
+        }
+    }
+
+    /// The world point under a minimap-local point.
+    pub fn minimap_world_at(&self, local: [f32; 2]) -> Point {
+        let map = self.minimap_map();
+        Point::new(
+            map.center.x + (f64::from(local[0]) - f64::from(MINIMAP_WIDTH) * 0.5) / map.scale,
+            map.center.y + (f64::from(local[1]) - f64::from(MINIMAP_HEIGHT) * 0.5) / map.scale,
+        )
+    }
+
+    /// Clicking or dragging in the minimap centres the camera on that board point.
+    pub fn minimap_navigate(&mut self, local: [f32; 2]) {
+        let target = self.minimap_world_at(local);
+        let zoom = self.zoom();
+        self.camera.pan_by_screen_delta(
+            (self.camera.center.x - target.x) * zoom,
+            (self.camera.center.y - target.y) * zoom,
+        );
+    }
+
+    pub fn minimap_drag(&mut self, drag: &Drag) {
+        if drag.phase != Phase::Up {
+            self.minimap_navigate([drag.x, drag.y]);
+        }
     }
 
     pub fn apply_slider(&mut self, target: Target, fraction: f64) {
@@ -552,6 +836,49 @@ impl DoodleApp {
             self.color = DARK_INK;
         } else if !self.light_theme && self.color == DARK_INK {
             self.color = LIGHT_INK;
+        }
+    }
+
+    /// Foreground panels are mutually exclusive: at most one of Canvas settings, Shortcuts &
+    /// about, and the minimap is open. Opening one closes the others, and closing it never
+    /// reopens them.
+    pub fn open_settings(&mut self) {
+        self.show_settings = true;
+        self.show_help = false;
+        self.minimap_open = false;
+    }
+
+    pub fn toggle_settings(&mut self) {
+        if self.show_settings {
+            self.show_settings = false;
+        } else {
+            self.open_settings();
+        }
+    }
+
+    pub fn open_help(&mut self) {
+        self.show_help = true;
+        self.show_settings = false;
+        self.minimap_open = false;
+    }
+
+    pub fn toggle_help(&mut self) {
+        if self.show_help {
+            self.show_help = false;
+        } else {
+            self.open_help();
+        }
+    }
+
+    /// The minimap button toggles the minimap's own state; opening it does close the two
+    /// foreground panels, and closing it never reopens them.
+    pub fn toggle_minimap(&mut self) {
+        if self.minimap_open {
+            self.minimap_open = false;
+        } else {
+            self.minimap_open = true;
+            self.show_settings = false;
+            self.show_help = false;
         }
     }
 
@@ -860,6 +1187,7 @@ impl DoodleApp {
             width,
             height,
             style: StatementStyle::default(),
+            kind: StatementKind::Sticky,
         };
         let pose = Pose::new(chosen.min_x, chosen.min_y);
         match self.doc.create_statement(pose, statement) {
@@ -936,10 +1264,129 @@ impl DoodleApp {
                         return Some(projected.top_id);
                     }
                 }
+                ObjectKind::Shape(shape) => {
+                    if doodle_canvas::geometry::shape_hit_clearance(
+                        shape,
+                        projected.object.pose,
+                        world,
+                    ) <= tolerance
+                    {
+                        return Some(projected.top_id);
+                    }
+                }
                 ObjectKind::Group => {}
             }
         }
         None
+    }
+
+    /// Every top-level object the eraser's world-space radius touches at `world`. A stroke is
+    /// hit against its centreline plus half its ink width, the same test selection uses, so the
+    /// eraser removes a whole stroke rather than pixels. Statements are hit by their bounds.
+    fn objects_at(&self, world: Point, radius: f64) -> Vec<ObjectId> {
+        let mut ids = Vec::new();
+        for projected in &self.projection.objects {
+            let hit = match &projected.object.kind {
+                ObjectKind::Stroke(stroke) => doodle_canvas::geometry::stroke_hit_clearance(
+                    &stroke.geometry,
+                    projected.object.pose,
+                    world,
+                )
+                .is_some_and(|clearance| clearance <= radius),
+                ObjectKind::Statement(_) => projected
+                    .bounds
+                    .is_some_and(|bounds| bounds.expand(radius).contains(world)),
+                ObjectKind::Shape(shape) => {
+                    doodle_canvas::geometry::shape_hit_clearance(
+                        shape,
+                        projected.object.pose,
+                        world,
+                    ) <= radius
+                }
+                ObjectKind::Group => false,
+            };
+            if hit {
+                ids.push(projected.top_id);
+            }
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
+    /// Eraser hits along the segment the pointer just travelled, sampled every quarter radius so
+    /// a fast drag cannot step over a thin line. Ids already erased in this gesture are skipped,
+    /// so each object is removed once however often the pointer crosses it.
+    fn erase_hits_between(&self, from: Point, to: Point) -> Vec<ObjectId> {
+        let radius = ERASER_RADIUS / self.zoom();
+        let length = from.distance(to);
+        let steps = (length / (radius * 0.5)).ceil().max(1.0) as usize;
+        let mut hits = Vec::new();
+        for step in 0..=steps {
+            let t = step as f64 / steps as f64;
+            let at = Point::new(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t);
+            hits.extend(self.objects_at(at, radius));
+        }
+        hits.sort_unstable();
+        hits.dedup();
+        hits.retain(|id| {
+            self.erasing
+                .as_ref()
+                .is_none_or(|gesture| !gesture.removed.contains(id))
+        });
+        hits
+    }
+
+    /// An object the in-flight eraser drag has already removed from view. The document still
+    /// holds it until the drag ends and the batch delete commits.
+    pub fn pending_erase(&self, id: ObjectId) -> bool {
+        self.erasing
+            .as_ref()
+            .is_some_and(|gesture| gesture.removed.contains(&id))
+    }
+
+    fn begin_erase(&mut self, world: Point) {
+        self.stroke = None;
+        self.drag = None;
+        self.marquee = None;
+        self.panning = false;
+        let removed = self.objects_at(world, ERASER_RADIUS / self.zoom());
+        self.erasing = Some(EraseGesture {
+            removed: removed.into_iter().collect(),
+            last: world,
+        });
+    }
+
+    fn continue_erase(&mut self, world: Point) {
+        let Some(last) = self.erasing.as_ref().map(|gesture| gesture.last) else {
+            return;
+        };
+        let hits = self.erase_hits_between(last, world);
+        if let Some(gesture) = self.erasing.as_mut() {
+            gesture.removed.extend(hits);
+            gesture.last = world;
+        }
+    }
+
+    /// Commits the drag as one document command, so a single undo restores everything it
+    /// removed. The pending set only hid the objects; the document still has them.
+    fn finish_erase(&mut self, cancelled: bool) {
+        let Some(gesture) = self.erasing.take() else {
+            return;
+        };
+        if cancelled || gesture.removed.is_empty() {
+            return;
+        }
+        let ids: Vec<ObjectId> = gesture.removed.into_iter().collect();
+        let count = ids.len();
+        match self.doc.delete_objects(&ids) {
+            Ok(_) => {
+                self.refresh();
+                let noun = if count == 1 { "object" } else { "objects" };
+                self.set_notice(NoticeKind::Info, format!("Erased {count} {noun}"));
+            }
+            Err(error) => self.set_notice(NoticeKind::Error, format!("Erase failed: {error}")),
+        }
     }
 
     pub fn drag_offsets(&self) -> std::collections::HashMap<ObjectId, (f64, f64)> {
@@ -959,6 +1406,7 @@ impl DoodleApp {
     // ---- input ---------------------------------------------------------------------------
 
     pub fn pointer_moved(&mut self, x: f32, y: f32) {
+        self.track_pointer(x, y);
         let world = self
             .camera
             .screen_to_world(Point::new(f64::from(x), f64::from(y)), self.viewport());
@@ -966,8 +1414,36 @@ impl DoodleApp {
         self.update_pending_import(world);
     }
 
+    /// Remembers where the pointer is on the board and a smoothed direction of travel. The
+    /// eraser's tail uses both, so it follows idle movement rather than appearing on a press.
+    fn track_pointer(&mut self, x: f32, y: f32) {
+        if !x.is_finite() || !y.is_finite() {
+            return;
+        }
+        let next = [x, y];
+        if let Some(previous) = self.pointer_screen {
+            let delta = [next[0] - previous[0], next[1] - previous[1]];
+            let distance = delta[0].hypot(delta[1]);
+            if distance > 0.75 {
+                let step = [delta[0] / distance, delta[1] / distance];
+                self.eraser_trail_dir = Some(match self.eraser_trail_dir {
+                    Some(previous) => {
+                        let blended = [
+                            previous[0] * 0.65 + step[0] * 0.35,
+                            previous[1] * 0.65 + step[1] * 0.35,
+                        ];
+                        let length = blended[0].hypot(blended[1]).max(1e-3);
+                        [blended[0] / length, blended[1] / length]
+                    }
+                    None => step,
+                });
+            }
+        }
+        self.pointer_screen = Some(next);
+    }
+
     /// The settings panel is a fixed-height overlay, so its wheel scrolling is clamped here
-    /// instead of panned into the board beneath it.
+    /// instead of zoomed underneath it.
     pub fn settings_rect(&self) -> Option<[f32; 4]> {
         self.show_settings.then(|| {
             let height = (self.window_size[1] - 150.0).clamp(280.0, 680.0);
@@ -975,35 +1451,110 @@ impl DoodleApp {
         })
     }
 
+    /// The help panel's window rect, shared with `view::help_panel`. Its height leaves the
+    /// bottom-left cluster (36 tall, 10 from the edge) plus a 12 pt gap clear.
+    ///
+    /// A local AI card is not a foreground panel, so help steps around it instead of covering
+    /// it: the base slot is used while clear, then a slot left or right of a card, then one
+    /// below the lowest card when the window is too narrow for both side by side.
+    pub fn help_rect(&self) -> Option<[f32; 4]> {
+        self.show_help.then(|| {
+            const WIDTH: f32 = 420.0;
+            let height = (self.window_size[1] - 188.0).clamp(240.0, 620.0);
+            let base = [220.0, 120.0, WIDTH, height];
+            let cards: Vec<[f32; 4]> = self
+                .cards
+                .iter()
+                .map(|card| {
+                    let layout = crate::cards::card_layout(self, card);
+                    [layout.x, layout.y, layout.width, layout.height]
+                })
+                .collect();
+            let clear = |rect: [f32; 4]| !cards.iter().any(|card| rects_overlap(rect, *card));
+            if clear(base) {
+                return base;
+            }
+            let max_x = (self.window_size[0] - WIDTH - 12.0).max(12.0);
+            for card in &cards {
+                for x in [card[0] - WIDTH - 12.0, card[0] + card[2] + 12.0] {
+                    let candidate = [x.clamp(12.0, max_x), base[1], WIDTH, height];
+                    if clear(candidate) {
+                        return candidate;
+                    }
+                }
+            }
+            let below = cards
+                .iter()
+                .map(|card| card[1] + card[3])
+                .fold(0.0, f32::max)
+                + 12.0;
+            if below + height <= self.window_size[1] - 12.0 {
+                let candidate = [base[0], below, WIDTH, height];
+                if clear(candidate) {
+                    return candidate;
+                }
+            }
+            base
+        })
+    }
+
+    /// Whether the pointer is over a surface that scrolls itself and must keep the wheel: a
+    /// panel scroll view or a local AI card. The board never zooms beneath these.
+    fn wheel_over_overlay(&self, x: f32, y: f32) -> bool {
+        let inside =
+            |[rx, ry, rw, rh]: [f32; 4]| x >= rx && x <= rx + rw && y >= ry && y <= ry + rh;
+        self.settings_rect().is_some_and(inside)
+            || self.help_rect().is_some_and(inside)
+            || self.cards.iter().any(|card| {
+                let layout = crate::cards::card_layout(self, card);
+                inside([layout.x, layout.y, layout.width, layout.height])
+            })
+    }
+
+    /// Plain wheel and `Ctrl`/`Cmd`+wheel zoom around the pointer, as Excalidraw does: a wheel
+    /// notch up zooms in and a notch down zooms out. Rune reports the delta in content points,
+    /// positive for content moving down and right, which is what a wheel notch up produces, so
+    /// the factor grows with `dy`. `Shift`+wheel is the one pan gesture left on the wheel: it
+    /// moves the camera horizontally (Rune has already turned a vertical wheel notch into `dx`
+    /// on Windows and Linux, and macOS reports `dy`, which is used here).
     pub fn wheel(&mut self, ev: &WheelEvent) -> bool {
-        if self
-            .settings_rect()
-            .is_some_and(|[x, y, w, h]| ev.x >= x && ev.x <= x + w && ev.y >= y && ev.y <= y + h)
-        {
-            // The panel's own scroll view takes the wheel; the board beneath must not pan.
+        if self.wheel_over_overlay(ev.x, ev.y) {
+            // A panel or card scroll view takes the wheel; the board must not zoom beneath it.
             return false;
         }
         let viewport = self.viewport();
-        let zooming = ev.mods.cmd || ev.mods.ctrl;
-        if zooming {
-            if ev.dy.abs() > 0.05 {
-                let factor = (-f64::from(ev.dy) * 0.0022).exp();
-                self.camera.zoom_at(
-                    Point::new(f64::from(ev.x), f64::from(ev.y)),
-                    viewport,
-                    factor,
-                );
+        if ev.mods.shift && !ev.mods.cmd && !ev.mods.ctrl {
+            let dx = if ev.dx.abs() > f32::EPSILON {
+                ev.dx
+            } else {
+                ev.dy
+            };
+            if dx.abs() > 0.05 {
+                self.camera.pan_by_screen_delta(f64::from(dx), 0.0);
             }
-        } else {
-            self.camera
-                .pan_by_screen_delta(f64::from(ev.dx), f64::from(ev.dy));
+            return true;
+        }
+        if ev.dy.abs() > 0.05 {
+            let factor = (f64::from(ev.dy) * 0.0022).exp();
+            self.camera.zoom_at(
+                Point::new(f64::from(ev.x), f64::from(ev.y)),
+                viewport,
+                factor,
+            );
         }
         true
     }
 
     pub fn magnify(&mut self, ev: &MagnifyEvent) -> bool {
         let viewport = self.viewport();
-        let factor = 1.0 + f64::from(ev.delta);
+        // macOS reports a pinch directly, positive to zoom in. Windows and Linux report a pinch
+        // and Ctrl+wheel as `-dy / 200` (see `El::on_magnify`), so the same wheel-up-zooms-in
+        // direction the plain wheel uses is recovered here.
+        let factor = if cfg!(target_os = "macos") {
+            1.0 + f64::from(ev.delta)
+        } else {
+            (-f64::from(ev.delta) * 0.44).exp()
+        };
         self.camera.zoom_at(
             Point::new(f64::from(ev.x), f64::from(ev.y)),
             viewport,
@@ -1012,20 +1563,21 @@ impl DoodleApp {
         true
     }
 
-    pub fn canvas_drag(&mut self, drag: &Drag) {
+    pub fn canvas_drag(&mut self, drag: &Drag, button: PointerButton, tx: &mut Tx) {
         let viewport = self.viewport();
+        self.track_pointer(drag.x, drag.y);
         let world = self
             .camera
             .screen_to_world(Point::new(f64::from(drag.x), f64::from(drag.y)), viewport);
         self.last_pointer_world = world;
         match drag.phase {
-            Phase::Down => self.begin_press(drag, world),
+            Phase::Down => self.begin_press(drag, world, button, tx),
             Phase::Move => self.continue_press(drag, world),
             Phase::Up => self.finish_press(drag, world),
         }
     }
 
-    fn begin_press(&mut self, drag: &Drag, world: Point) {
+    fn begin_press(&mut self, drag: &Drag, world: Point, button: PointerButton, tx: &mut Tx) {
         // A press that dismisses a popover must not also start a board gesture. The scrim covers
         // the board, but in the frame it mounts its hit box can still be smaller than the window,
         // so the press can reach the canvas first; consume it here as the scrim would.
@@ -1051,7 +1603,31 @@ impl DoodleApp {
             self.commit_pending_import();
             return;
         }
+        // The middle button pans the board whatever tool is active, exactly like the hand tool.
+        if button == PointerButton::Middle {
+            self.stroke = None;
+            self.drag = None;
+            self.marquee = None;
+            self.erasing = None;
+            self.shape_drag = None;
+            self.panning = true;
+            self.pan_last = [drag.x, drag.y];
+            return;
+        }
+        // A press on the board finishes an inline editor first; text and sticky tools then open a
+        // fresh one at the new point instead of drawing anything.
+        if self.editor.is_some() {
+            self.commit_editor();
+        }
         let shift = self.mods.shift;
+        if let Some(kind) = self.tool.statement_kind() {
+            self.open_editor(kind, world);
+            // `autofocus` only speaks to a modal; a board-anchored field asks for focus itself
+            // so typing lands in the new editor straight away.
+            tx.focus_when_shown("inline-editor-field", false);
+            self.hint_visible = false;
+            return;
+        }
         match self.tool {
             Tool::Hand => {
                 self.panning = true;
@@ -1096,6 +1672,22 @@ impl DoodleApp {
                     self.drag = None;
                 }
             }
+            Tool::Eraser => self.begin_erase(world),
+            Tool::Rectangle | Tool::Diamond | Tool::Ellipse | Tool::Arrow | Tool::Line => {
+                let Some(kind) = self.tool.shape_kind() else {
+                    return;
+                };
+                self.stroke = None;
+                self.drag = None;
+                self.marquee = None;
+                self.erasing = None;
+                self.shape_drag = Some(ShapeDrag {
+                    kind,
+                    start: world,
+                    current: world,
+                });
+            }
+            Tool::Text | Tool::Sticky => {}
         }
     }
 
@@ -1105,6 +1697,14 @@ impl DoodleApp {
             let dy = f64::from(drag.y - self.pan_last[1]);
             self.pan_last = [drag.x, drag.y];
             self.camera.pan_by_screen_delta(dx, dy);
+            return;
+        }
+        if self.erasing.is_some() {
+            self.continue_erase(world);
+            return;
+        }
+        if let Some(gesture) = self.shape_drag.as_mut() {
+            gesture.current = world;
             return;
         }
         if let Some(gesture) = self.stroke.as_mut() {
@@ -1144,6 +1744,18 @@ impl DoodleApp {
         }
         if self.panning {
             self.panning = false;
+            return;
+        }
+        if self.erasing.is_some() {
+            self.finish_erase(drag.cancelled());
+            return;
+        }
+        if self.shape_drag.is_some() {
+            if drag.cancelled() {
+                self.shape_drag = None;
+            } else {
+                self.commit_shape();
+            }
             return;
         }
         if let Some(mut gesture) = self.stroke.take() {
@@ -1291,6 +1903,12 @@ fn overlap_area(a: Rect, b: Rect) -> f64 {
     width * height
 }
 
+/// Whether two `[x, y, width, height]` window rects share any area. Touching edges do not
+/// count, so a panel placed 12 pt clear of a card is clear at the exact boundary.
+fn rects_overlap(a: [f32; 4], b: [f32; 4]) -> bool {
+    a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
+}
+
 pub fn on_modifiers(state: &mut DoodleApp, mods: Mods, _tx: &mut Tx) {
     state.mods = mods;
 }
@@ -1304,6 +1922,7 @@ pub fn poll(state: &mut DoodleApp, t: f64, tx: &mut Tx) -> bool {
         || state.stroke.is_some()
         || state.drag.is_some()
         || state.marquee.is_some()
+        || state.erasing.is_some()
         || state.panning;
     if animating {
         tx.wake_after(Duration::from_millis(33));
@@ -1348,6 +1967,11 @@ pub fn key_event(state: &mut DoodleApp, ev: &KeyEvent, tx: &mut Tx) -> bool {
         }
         return false;
     }
+    // Return closes the inline editor even if the field itself did not take it.
+    if ev.key == Key::Enter && state.editor.is_some() {
+        state.commit_editor();
+        return true;
+    }
     match &ev.key {
         Key::Text(text) => {
             if mods.alt && text.eq_ignore_ascii_case("z") {
@@ -1357,19 +1981,28 @@ pub fn key_event(state: &mut DoodleApp, ev: &KeyEvent, tx: &mut Tx) -> bool {
             if mods.alt || mods.ctrl {
                 return false;
             }
+            // The inline editor owns the plain keys while it is open; Rune sends typing to the
+            // focused field first, and anything left over must not switch tools underneath it.
+            if state.editor.is_some() {
+                return false;
+            }
             match text.as_str() {
-                "b" => state.tool = Tool::Draw,
-                "v" => {
-                    state.tool = Tool::Select;
-                    state.stroke = None;
-                }
-                "h" => {
-                    state.tool = Tool::Hand;
-                    state.stroke = None;
-                }
+                // P is the pen's primary key; B stays as an alias for muscle memory.
+                "p" | "b" => state.set_tool(Tool::Draw),
+                "v" => state.set_tool(Tool::Select),
+                "h" => state.set_tool(Tool::Hand),
+                "r" => state.set_tool(Tool::Rectangle),
+                "d" => state.set_tool(Tool::Diamond),
+                "o" => state.set_tool(Tool::Ellipse),
+                "a" => state.set_tool(Tool::Arrow),
+                "l" => state.set_tool(Tool::Line),
+                "t" => state.set_tool(Tool::Text),
+                "n" => state.set_tool(Tool::Sticky),
+                "e" => state.set_tool(Tool::Eraser),
+                "q" => state.toolbar_locked = !state.toolbar_locked,
                 "f" => state.fit_to_content(),
                 "0" => state.camera.reset(),
-                "?" => state.show_help = !state.show_help,
+                "?" => state.toggle_help(),
                 "+" | "=" => state.zoom_from_center(1.2),
                 "-" => state.zoom_from_center(1.0 / 1.2),
                 _ => return false,
@@ -1381,6 +2014,11 @@ pub fn key_event(state: &mut DoodleApp, ev: &KeyEvent, tx: &mut Tx) -> bool {
             true
         }
         Key::Escape => {
+            // Escape in the inline editor cancels only the editor, creating nothing.
+            if state.editor.is_some() {
+                state.cancel_editor();
+                return true;
+            }
             // Cancel any in-flight gesture, then close the topmost open overlay. The pin and
             // close dialogs own Escape first; the popovers follow, then the panels, then zen.
             let dialog_open = state.show_close_confirm || state.pin_preview.is_some();
@@ -1408,7 +2046,7 @@ pub fn key_event(state: &mut DoodleApp, ev: &KeyEvent, tx: &mut Tx) -> bool {
             true
         }
         Key::Function(1) => {
-            state.show_help = !state.show_help;
+            state.toggle_help();
             true
         }
         _ => {

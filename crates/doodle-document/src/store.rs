@@ -1,7 +1,7 @@
 use doodle_types::{
     BoardSnapshot, CommandError, DocumentOutcome, MAX_GROUP_DEPTH, MAX_OBJECTS,
-    MAX_TOTAL_STROKE_POINTS, ObjectDelta, ObjectId, ObjectKind, Pose, Rect, StatementObject,
-    StoredObject, StrokeGeometry, StrokeStyle,
+    MAX_TOTAL_STROKE_POINTS, ObjectDelta, ObjectId, ObjectKind, Pose, Rect, ShapeObject,
+    StatementObject, StoredObject, StrokeGeometry, StrokeStyle,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use thiserror::Error;
@@ -274,6 +274,24 @@ impl BoardDocument {
             return Err(CommandError::InvalidObject.into());
         }
         self.insert_new_objects(vec![object], "statement")
+    }
+
+    pub fn create_shape(
+        &mut self,
+        pose: Pose,
+        shape: ShapeObject,
+    ) -> Result<DocumentOutcome, DocumentError> {
+        let object = StoredObject {
+            id: ObjectId::new(),
+            parent: None,
+            order_key: self.next_order_key(),
+            pose,
+            kind: ObjectKind::Shape(shape),
+        };
+        if !object.is_valid() {
+            return Err(CommandError::InvalidObject.into());
+        }
+        self.insert_new_objects(vec![object], "shape")
     }
 
     pub fn commit_import(
@@ -949,6 +967,7 @@ enum KindTag {
     Stroke,
     Group,
     Statement,
+    Shape,
 }
 
 impl KindTag {
@@ -957,6 +976,7 @@ impl KindTag {
             Self::Stroke => "stroke",
             Self::Group => "group",
             Self::Statement => "statement",
+            Self::Shape => "shape",
         }
     }
 
@@ -965,6 +985,7 @@ impl KindTag {
             "stroke" => Some(Self::Stroke),
             "group" => Some(Self::Group),
             "statement" => Some(Self::Statement),
+            "shape" => Some(Self::Shape),
             _ => None,
         }
     }
@@ -976,6 +997,7 @@ impl Prepared {
             ObjectKind::Stroke(_) => KindTag::Stroke,
             ObjectKind::Group => KindTag::Group,
             ObjectKind::Statement(_) => KindTag::Statement,
+            ObjectKind::Shape(_) => KindTag::Shape,
         };
         let kind_bytes = postcard::to_allocvec(&object.kind).map_err(|_| DocumentError::Encode)?;
         Ok(Self {
@@ -1021,6 +1043,7 @@ fn read_object<T: ReadTxn>(map: &MapRef, txn: &T, id: ObjectId) -> Option<Stored
         (KindTag::Stroke, ObjectKind::Stroke(_))
             | (KindTag::Group, ObjectKind::Group)
             | (KindTag::Statement, ObjectKind::Statement(_))
+            | (KindTag::Shape, ObjectKind::Shape(_))
     );
     if !matches {
         return None;
@@ -1201,7 +1224,7 @@ fn project_objects(raw: HashMap<ObjectId, StoredObject>, revision: u64) -> Board
 #[cfg(test)]
 mod tests {
     use super::*;
-    use doodle_types::{StrokeObject, StrokePoint};
+    use doodle_types::{ShapeKind, StatementKind, StatementStyle, StrokeObject, StrokePoint};
 
     fn stroke(offset: f64) -> StoredObject {
         StoredObject {
@@ -1559,6 +1582,120 @@ mod tests {
             projection.objects[0].top_id,
             projection.objects[0].object.id
         );
+    }
+
+    #[test]
+    fn shape_creation_projects_and_undoes_in_one_step() {
+        let mut doc = BoardDocument::new();
+        let shape = ShapeObject {
+            shape: ShapeKind::Diamond,
+            width: 120.0,
+            height: 80.0,
+            style: StrokeStyle::default(),
+            flip_x: false,
+            flip_y: false,
+        };
+        let outcome = doc
+            .create_shape(Pose::new(10.0, 20.0), shape)
+            .expect("create shape");
+        assert_eq!(outcome.created.len(), 1);
+        assert_eq!(doc.undo_depth(), 1);
+        assert_eq!(doc.undo_label(), Some("shape"));
+        let projection = doc.project().expect("projection");
+        let object = projection.get(outcome.created[0]).expect("shape");
+        assert_eq!(object.bounds, Some(Rect::new(10.0, 20.0, 130.0, 100.0)));
+        assert!(matches!(object.object.kind, ObjectKind::Shape(_)));
+
+        doc.undo().expect("undo shape");
+        assert!(doc.project().expect("projection").objects.is_empty());
+        doc.redo().expect("redo shape");
+        assert_eq!(doc.project().expect("projection").objects.len(), 1);
+    }
+
+    #[test]
+    fn invalid_shape_is_rejected() {
+        let mut doc = BoardDocument::new();
+        let shape = ShapeObject {
+            shape: ShapeKind::Rectangle,
+            width: 0.0,
+            height: 80.0,
+            style: StrokeStyle::default(),
+            flip_x: false,
+            flip_y: false,
+        };
+        let result = doc.create_shape(Pose::default(), shape);
+        assert!(matches!(
+            result,
+            Err(DocumentError::Command(CommandError::InvalidObject))
+        ));
+        assert!(doc.project().expect("projection").objects.is_empty());
+    }
+
+    #[test]
+    fn zero_extent_open_shape_keeps_direction_and_undoes_once() {
+        let mut doc = BoardDocument::new();
+        let shape = ShapeObject {
+            shape: ShapeKind::Arrow,
+            width: 0.0,
+            height: 120.0,
+            style: StrokeStyle::default(),
+            flip_x: false,
+            flip_y: true,
+        };
+        let outcome = doc
+            .create_shape(Pose::new(40.0, 20.0), shape)
+            .expect("create vertical arrow");
+        assert_eq!(doc.undo_depth(), 1);
+        let projection = doc.project().expect("projection");
+        let object = projection.get(outcome.created[0]).expect("arrow");
+        assert_eq!(object.bounds, Some(Rect::new(40.0, 20.0, 40.0, 140.0)));
+        let ObjectKind::Shape(stored) = &object.object.kind else {
+            panic!("expected a shape");
+        };
+        assert!(stored.flip_y);
+        assert!(!stored.flip_x);
+
+        doc.undo().expect("undo arrow");
+        assert!(doc.project().expect("projection").objects.is_empty());
+    }
+
+    #[test]
+    fn shape_and_statement_kinds_survive_projection() {
+        let mut doc = BoardDocument::new();
+        doc.create_shape(
+            Pose::new(0.0, 0.0),
+            ShapeObject {
+                shape: ShapeKind::Arrow,
+                width: 90.0,
+                height: 40.0,
+                style: StrokeStyle::default(),
+                flip_x: false,
+                flip_y: false,
+            },
+        )
+        .expect("shape");
+        doc.create_statement(
+            Pose::new(200.0, 0.0),
+            StatementObject {
+                text: "plain".into(),
+                width: 200.0,
+                height: 60.0,
+                style: StatementStyle::default(),
+                kind: StatementKind::Text,
+            },
+        )
+        .expect("text");
+        let projection = doc.project().expect("projection");
+        assert!(projection.objects.iter().any(|object| matches!(
+            &object.object.kind,
+            ObjectKind::Shape(shape) if shape.shape == ShapeKind::Arrow
+        )));
+        assert!(projection.objects.iter().any(|object| matches!(
+            &object.object.kind,
+            ObjectKind::Statement(statement) if statement.kind == StatementKind::Text
+        )));
+        let snapshot = doc.snapshot_visible();
+        assert_eq!(snapshot.validate(), Ok(()));
     }
 
     #[test]

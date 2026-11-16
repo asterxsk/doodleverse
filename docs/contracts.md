@@ -137,10 +137,15 @@ The UI must not depend on CRDT iteration order, map keys, or internal yrs types.
 
 ## 9. Input
 
-- `B`/`V`/`H` switch brush/select/hand; `Alt+Z` toggles zen mode; `Esc` cancels the active
-  interaction. Entering zen closes open panels so no island or modal is left floating.
-- The Rune shell pans on the wheel and zooms on `Ctrl`/`Cmd`+wheel or pinch; the settings panel
-  keeps the wheel while the pointer is over it, so the board never pans underneath.
+- `P` (with `B` as an alias) / `V` / `H` / `E` switch pen/select/hand/eraser; `Alt+Z` toggles
+  zen mode; `Esc` cancels the active interaction, including an erase drag before it commits.
+  Entering zen closes open panels so no island or modal is left floating.
+- The Rune shell zooms on the wheel around the pointer (plain wheel, `Ctrl`/`Cmd`+wheel, or
+  pinch); `Shift`+wheel pans horizontally; dragging with the Hand tool pans. The settings and
+  help panels and local AI cards keep the wheel while the pointer is over them, so the board
+  never zooms underneath.
+- The eraser removes whole objects touched by its small world-space radius. One drag collects
+  its objects and commits one `delete_objects` batch, so a single undo restores all of them.
 - Text input owns the keyboard while a text field is focused; global shortcuts must not fire then.
 - Pen pressure is `Option<f32>` in `0.0..=1.0`. `None` means "no pressure source" and selects the
   simulated mouse envelope. A hardware source must not report a constant fake value.

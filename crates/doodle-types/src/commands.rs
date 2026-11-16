@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::ids::ObjectId;
-use crate::objects::{Pose, StatementObject, StoredObject, StrokeGeometry, StrokeStyle};
+use crate::objects::{
+    Pose, ShapeObject, StatementObject, StoredObject, StrokeGeometry, StrokeStyle,
+};
 
 /// Commands that mutate the shared document. Local camera, selection, appearance, and AI drafts
 /// are not document commands.
@@ -16,6 +18,10 @@ pub enum DocumentCommand {
     CreateStatement {
         pose: Pose,
         statement: StatementObject,
+    },
+    CreateShape {
+        pose: Pose,
+        shape: ShapeObject,
     },
     MoveObjects {
         ids: Vec<ObjectId>,

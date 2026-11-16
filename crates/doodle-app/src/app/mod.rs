@@ -14,8 +14,8 @@ use doodle_canvas::{BrushSettings, Camera, StrokeBuilder};
 use doodle_document::{BoardDocument, BoardProjection};
 use doodle_render::{GridSettings, SceneRenderer};
 use doodle_types::{
-    MAX_IMPORT_BYTES, ObjectId, Point, Pose, Rect, StatementObject, StatementStyle, StrokeGeometry,
-    StrokeStyle,
+    MAX_IMPORT_BYTES, ObjectId, Point, Pose, Rect, StatementKind, StatementObject, StatementStyle,
+    StrokeGeometry, StrokeStyle,
 };
 use eframe::egui;
 
@@ -525,6 +525,7 @@ impl DoodleApp {
             width,
             height,
             style: StatementStyle::default(),
+            kind: StatementKind::Sticky,
         };
         let pose = Pose::new(
             card.card.world_pos.x + 384.0 / self.camera.zoom.max(doodle_types::MIN_ZOOM),

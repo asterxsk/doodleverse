@@ -6,6 +6,7 @@ mod app;
 mod assets;
 mod canvas;
 mod cards;
+mod icons;
 mod placement;
 mod theme;
 mod view;

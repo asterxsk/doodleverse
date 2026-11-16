@@ -70,7 +70,7 @@ and images live in the untracked `scratch/` directory; the tracked screenshot is
 | Marquee selection, group, selection outlines and corner handles | Verified |
 | Undo then redo through the tool island | Verified; object counts changed 3 → 2 → 2 |
 | Hand-tool drag pan and zoom-in button | Verified; grid origin and zoom badge moved |
-| Wheel pan, `Ctrl`+wheel zoom and pinch magnify handlers | Implemented; wheel pan and button zoom verified |
+| Wheel pan, `Ctrl`+wheel zoom and pinch magnify handlers | Superseded by plain-wheel zoom; `Ctrl`+wheel and pinch verified |
 | Canvas settings: panel scroll, light/dark, six board presets, grid kinds, all sliders | Verified; wheel over the panel scrolls it to the brush section |
 | Dark board swaps the default ink so new strokes stay readable | Verified |
 | Zen mode closes open panels and hides every island | Verified |
@@ -88,6 +88,11 @@ Headless commands used:
 cargo build -p doodle-app-rune
 ./target/debug/doodleverse-rune.exe --size 1180x760 --script scratch/scroll.json --snap scratch/rune-scroll.png
 ```
+
+The tool-keybadge, icon, wheel-zoom and eraser runs used the scripts in `scratch/kb/`
+(`wheel-zoom.json`, `wheel-settings.json`, `wheel-card-880.json`, `pinch.json`,
+`hand-pan.json`, `eraser-one.json`, `eraser-batch.json`, `light.json`, `dark.json`), each
+rendered with `--at mark:NAME --snap` and `--tree`.
 
 Real-window run on a second monitor (window is hidden only in the console sense; winit still shows
 the app):
@@ -113,7 +118,7 @@ separate implementer fixed the confirmed findings and a new tester re-ran the ap
 | Tokens: indigo accent, radius-8 islands, 36×36 tool boxes, 22×22 swatches, `#121212` dark canvas | Verified in light and dark screenshots |
 | Menu and overflow popovers mount and unmount instantly; scrim and Escape dismiss | Verified; no ghost rows one frame after dismissal |
 | Settings panel scroll with sticky header and close; help panel sticky header and Escape | Verified at 880×600 |
-| Canvas wheel pan over the empty-board hint; wheel over panels scrolls them, not the board | Verified |
+| Canvas wheel zooms over the empty-board hint; wheel over panels and AI cards scrolls them, not the board | Verified: cursor-anchored zoom, settings/help scroll and card-answer scroll all leave the zoom badge unchanged |
 | AI card with wrapped long question: card inside the window, footer clickable, answer scrolls fully | Verified at both sizes |
 | Pinned answers: note sized to its text, clear of chrome, never under the card | Verified for short and long answers, panned and unpanned |
 | Presses that open or dismiss a popover never start a canvas stroke | Verified at 0.02–0.1s delays and a normal tap still draws one stroke |
@@ -123,6 +128,10 @@ separate implementer fixed the confirmed findings and a new tester re-ran the ap
 | Disclosure buttons report expanded/collapsed; disabled buttons consume presses instead of drawing | Verified |
 | First frame matches the viewport; completed answers start at their first line | Verified |
 | Dark theme strokes, undo/redo, counts, group/ungroup, zen | Verified |
+| Tool keybinds: `P` pen with `B` alias, `V`, `H`, `E`; 10pt key badges and name+key tooltips | Verified in the element tree (`checked` state, `help` "Draw P" …) and in light/dark frames at both sizes |
+| Excalidraw-style pen, cursor, hand, eraser and 16px-grid overflow icons | Verified in magnified crops of the frames |
+| Whole-object eraser: one drag over one of two lines removes only that line; a drag across both removes both; one undo restores the whole gesture | Verified: counts 2 → 1 (undo 2), and 2 → 0 (single undo 2) |
+| Plain wheel zooms at the cursor; pinch still zooms; hand drag still pans | Verified: a 200pt horizontal stroke under the pointer stayed anchored while zoom went 100% → 125%; pinch 100% → 130%; hand drag moved the grid at 100% |
 
 Defects found and fixed across the rounds: answer text clipped and not scrollable, pinned note
 off-screen and later overlapping the card, Export unreachable below 1160pt, missing names and
@@ -135,6 +144,30 @@ height and falls back to the least-overlapping placement; a group container coun
 in the status line (two strokes grouped report three objects). The release build was launched in a
 real window after the token pass: title bar and taskbar icon present, top bar and islands render as
 in the headless frames, and `WM_CLOSE` on an empty board exits the process cleanly.
+
+## Pending verification: tool cursors, eraser feedback, zoom-out cost
+
+Implemented on 2026-11-16 after the user's own run, and deliberately not re-tested at the user's
+request ("don't do testing, just implement"). Only the compile gate and the affected unit tests
+ran through the implementer:
+
+- Per-tool canvas cursors: default arrow (select), grab/grabbing (hand and middle-drag), crosshair
+  (shape tools), custom pen and sticky-note PNG cursors, I-beam (text), hidden OS pointer with a
+  canvas-drawn translucent disc and 48pt tail (eraser).
+- Wheel up zooms in, wheel down zooms out at the pointer, in both scroll conventions; the
+  Windows/Linux pinch path keeps the same direction.
+- Scene batching: grid lines, dots and pluses are one path per kind (`stroke_path`/`fill_path`),
+  stroke segments are bucketed by half-point width and stroked per bucket, shape outlines are one
+  path each, and the minimap is capped to 400 objects / 24k points. The accumulated-`Shape` clone
+  per mark is gone; grid LOD is 16pt minimum spacing with a 3,000-mark cap and fades out below 5%
+  zoom.
+- Low-zoom freehand fidelity: accepted samples are refined with a uniform Catmull-Rom spline
+  before geometry is produced, so far-apart samples at deep zoom no longer render as straight
+  chords.
+
+Not yet verified: real-window cursor images (the headless runner has no OS cursor), perceived frame
+rate at each zoom level on the user's machine, middle-drag cursor state, and the visual feel of the
+eraser tail and spline curvature. The user will run these checks when they return to the app.
 
 ## Known verification gaps
 

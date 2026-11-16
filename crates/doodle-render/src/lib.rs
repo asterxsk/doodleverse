@@ -106,7 +106,7 @@ pub fn grid_frame(camera: &Camera, viewport: Rect, settings: GridSettings) -> Gr
     let mut spacing = settings.spacing;
     let mut screen_spacing = spacing * camera.zoom;
     let mut guard = 0;
-    while screen_spacing < 10.0 && guard < 32 {
+    while screen_spacing < 16.0 && guard < 32 {
         spacing *= 2.0;
         screen_spacing = spacing * camera.zoom;
         guard += 1;
@@ -116,8 +116,10 @@ pub fn grid_frame(camera: &Camera, viewport: Rect, settings: GridSettings) -> Gr
         screen_spacing = spacing * camera.zoom;
         guard += 1;
     }
-    let max_points = 18_000usize;
-    let max_lines = 400usize;
+    // A few thousand screen marks at most: more than that reads as a texture, not a grid, and
+    // the per-mark work dominates a zoomed-out frame.
+    let max_points = 3_000usize;
+    let max_lines = 240usize;
 
     // The grid lives in world space. Adapt its spacing until the visible cell count fits the
     // budget; this keeps the whole viewport covered instead of silently dropping the far edge.

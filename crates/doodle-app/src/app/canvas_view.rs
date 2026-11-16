@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use doodle_canvas::geometry::stroke_hit_clearance;
+use doodle_canvas::geometry::{shape_hit_clearance, stroke_hit_clearance};
 use doodle_canvas::{RawSample, StrokeBuilder, stroke_mesh};
 use doodle_render::grid_frame;
 use doodle_types::{ObjectId, ObjectKind, Point, Pose, Rect};
@@ -383,6 +383,11 @@ impl DoodleApp {
                         return Some(projected.top_id);
                     }
                 }
+                ObjectKind::Shape(shape) => {
+                    if shape_hit_clearance(shape, projected.object.pose, world) <= tolerance {
+                        return Some(projected.top_id);
+                    }
+                }
                 ObjectKind::Group => {}
             }
         }
@@ -699,6 +704,7 @@ impl DoodleApp {
                             egui::StrokeKind::Inside,
                         );
                     }
+                    ObjectKind::Shape(_) => {}
                     ObjectKind::Group => {}
                 }
             }

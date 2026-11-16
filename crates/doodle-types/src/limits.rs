@@ -10,6 +10,8 @@ pub const MAX_STROKE_POINTS: usize = 200_000;
 pub const MAX_TOTAL_STROKE_POINTS: usize = 2_000_000;
 pub const MAX_GROUP_DEPTH: usize = 64;
 pub const MAX_OBJECT_TEXT_BYTES: usize = 64 * 1024;
+pub const MIN_SHAPE_SIZE: f64 = 1.0;
+pub const MAX_SHAPE_SIZE: f64 = 1_000_000.0;
 pub const MAX_UNDO_STEPS: usize = 200;
 
 pub const MAX_IMPORT_BYTES: u64 = 64 * 1024 * 1024;

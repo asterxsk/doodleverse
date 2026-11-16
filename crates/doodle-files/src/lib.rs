@@ -355,8 +355,196 @@ mod tests {
                 width: 200.0,
                 height: 100.0,
                 style: doodle_types::StatementStyle::default(),
+                kind: doodle_types::StatementKind::Sticky,
             }),
         }
+    }
+
+    fn shape(kind: doodle_types::ShapeKind) -> StoredObject {
+        StoredObject {
+            id: ObjectId::new(),
+            parent: None,
+            order_key: 48,
+            pose: Pose::new(40.0, 60.0),
+            kind: ObjectKind::Shape(doodle_types::ShapeObject {
+                shape: kind,
+                width: 160.0,
+                height: 90.0,
+                style: StrokeStyle::default(),
+                flip_x: false,
+                flip_y: false,
+            }),
+        }
+    }
+
+    #[test]
+    fn round_trip_preserves_shapes_and_statement_kinds() {
+        let mut text = statement("plain");
+        if let ObjectKind::Statement(statement) = &mut text.kind {
+            statement.kind = doodle_types::StatementKind::Text;
+        }
+        let mut arrow = shape(doodle_types::ShapeKind::Arrow);
+        if let ObjectKind::Shape(shape) = &mut arrow.kind {
+            shape.width = 0.0;
+            shape.flip_y = true;
+        }
+        let snapshot = BoardSnapshot::new(vec![
+            shape(doodle_types::ShapeKind::Diamond),
+            arrow,
+            statement("sticky"),
+            text,
+        ]);
+        let bytes = encode(&snapshot).expect("encode");
+        let payload = decode_and_validate(&bytes).expect("decode");
+        assert_eq!(payload.object_count, 4);
+        assert!(payload.objects.iter().any(|object| matches!(
+            &object.kind,
+            ObjectKind::Shape(shape) if shape.shape == doodle_types::ShapeKind::Diamond
+        )));
+        let arrow = payload
+            .objects
+            .iter()
+            .find_map(|object| match &object.kind {
+                ObjectKind::Shape(shape) if shape.shape == doodle_types::ShapeKind::Arrow => {
+                    Some(shape)
+                }
+                _ => None,
+            })
+            .expect("arrow");
+        assert!(arrow.flip_y);
+        assert!(!arrow.flip_x);
+        assert_eq!((arrow.width, arrow.height), (0.0, 90.0));
+        assert!(payload.objects.iter().any(|object| matches!(
+            &object.kind,
+            ObjectKind::Statement(statement)
+                if statement.text == "plain" && statement.kind == doodle_types::StatementKind::Text
+        )));
+        assert!(payload.objects.iter().any(|object| matches!(
+            &object.kind,
+            ObjectKind::Statement(statement)
+                if statement.text == "sticky" && statement.kind == doodle_types::StatementKind::Sticky
+        )));
+    }
+
+    #[derive(serde::Serialize)]
+    struct LegacyStatement {
+        text: String,
+        width: f64,
+        height: f64,
+        style: doodle_types::StatementStyle,
+    }
+
+    #[derive(serde::Serialize)]
+    struct LegacyShape {
+        shape: doodle_types::ShapeKind,
+        width: f64,
+        height: f64,
+        style: StrokeStyle,
+    }
+
+    // Variant order must match `ObjectKind` so postcard's variant index is the same.
+    #[allow(dead_code)]
+    #[derive(serde::Serialize)]
+    enum LegacyObjectKind {
+        Stroke(StrokeObject),
+        Group,
+        Statement(LegacyStatement),
+        Shape(LegacyShape),
+    }
+
+    #[derive(serde::Serialize)]
+    struct LegacyStoredObject {
+        id: ObjectId,
+        parent: Option<ObjectId>,
+        order_key: i64,
+        pose: Pose,
+        kind: LegacyObjectKind,
+    }
+
+    #[derive(serde::Serialize)]
+    struct LegacySnapshot {
+        schema_version: u16,
+        objects: Vec<LegacyStoredObject>,
+    }
+
+    #[test]
+    fn snapshot_written_before_statement_kind_still_decodes() {
+        let legacy = LegacySnapshot {
+            schema_version: doodle_types::DOCUMENT_SCHEMA_VERSION,
+            objects: vec![LegacyStoredObject {
+                id: ObjectId::new(),
+                parent: None,
+                order_key: 0,
+                pose: Pose::new(5.0, 10.0),
+                kind: LegacyObjectKind::Statement(LegacyStatement {
+                    text: "old note".into(),
+                    width: 180.0,
+                    height: 90.0,
+                    style: doodle_types::StatementStyle::default(),
+                }),
+            }],
+        };
+        let bytes = wrap_legacy(&legacy, legacy.schema_version);
+
+        let decoded = decode_and_validate(&bytes).expect("legacy snapshot decodes");
+        let statement = decoded
+            .objects
+            .iter()
+            .find_map(|object| match &object.kind {
+                ObjectKind::Statement(statement) => Some(statement),
+                _ => None,
+            })
+            .expect("statement");
+        assert_eq!(statement.text, "old note");
+        assert_eq!(statement.kind, doodle_types::StatementKind::Sticky);
+    }
+
+    #[test]
+    fn snapshot_written_before_shape_direction_flags_still_decodes() {
+        let legacy = LegacySnapshot {
+            schema_version: doodle_types::DOCUMENT_SCHEMA_VERSION,
+            objects: vec![LegacyStoredObject {
+                id: ObjectId::new(),
+                parent: None,
+                order_key: 0,
+                pose: Pose::new(5.0, 10.0),
+                kind: LegacyObjectKind::Shape(LegacyShape {
+                    shape: doodle_types::ShapeKind::Arrow,
+                    width: 120.0,
+                    height: 80.0,
+                    style: StrokeStyle::default(),
+                }),
+            }],
+        };
+        let bytes = wrap_legacy(&legacy, legacy.schema_version);
+
+        let decoded = decode_and_validate(&bytes).expect("legacy shape decodes");
+        let shape = decoded
+            .objects
+            .iter()
+            .find_map(|object| match &object.kind {
+                ObjectKind::Shape(shape) => Some(shape),
+                _ => None,
+            })
+            .expect("arrow");
+        assert_eq!(shape.shape, doodle_types::ShapeKind::Arrow);
+        assert_eq!((shape.width, shape.height), (120.0, 80.0));
+        assert!(!shape.flip_x);
+        assert!(!shape.flip_y);
+    }
+
+    fn wrap_legacy<T: serde::Serialize>(snapshot: &T, schema_version: u16) -> Vec<u8> {
+        let payload = postcard::to_allocvec(snapshot).expect("legacy payload");
+        let mut bytes = Vec::with_capacity(HEADER_LEN + payload.len());
+        bytes.extend_from_slice(&MAGIC);
+        bytes.extend_from_slice(&doodle_types::ENVELOPE_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&schema_version.to_le_bytes());
+        bytes.extend_from_slice(&CODEC_POSTCARD.to_le_bytes());
+        bytes.extend_from_slice(&0_u16.to_le_bytes());
+        bytes.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&crc32fast::hash(&payload).to_le_bytes());
+        bytes.extend_from_slice(&payload);
+        bytes
     }
 
     #[test]

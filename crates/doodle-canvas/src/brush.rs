@@ -236,16 +236,21 @@ impl StrokeBuilder {
                 width,
             }]);
         }
-        let mut lengths = Vec::with_capacity(self.points.len());
+        // At low zoom accepted pointer samples are far apart in world space, so straight
+        // segments between them lose the curve. Refine each segment with a Catmull-Rom spline
+        // through its neighbours at roughly three screen points per step (the builder's
+        // `min_distance` is the accepted sample spacing, derived from the zoom).
+        let dense = self.densified_points();
+        let mut lengths = Vec::with_capacity(dense.len());
         let mut total = 0.0_f64;
         lengths.push(0.0);
-        for window in self.points.windows(2) {
+        for window in dense.windows(2) {
             total += window[0].0.distance(window[1].0);
             lengths.push(total);
         }
         let total = total.max(1e-6);
-        let mut points = Vec::with_capacity(self.points.len());
-        for (index, (point, width)) in self.points.iter().enumerate() {
+        let mut points = Vec::with_capacity(dense.len());
+        for (index, (point, width)) in dense.iter().enumerate() {
             let t = (lengths[index] / total).clamp(0.0, 1.0);
             let taper = taper_factor(
                 t,
@@ -261,6 +266,37 @@ impl StrokeBuilder {
         StrokeGeometry::new(points)
     }
 
+    /// The accepted samples with each segment refined by a Catmull-Rom spline. Steps are at
+    /// most four times `min_distance` (about three screen points) and capped per segment so a
+    /// single long jump cannot explode the point count.
+    fn densified_points(&self) -> Vec<(doodle_types::Point, f32)> {
+        const STEP_FACTOR: f64 = 4.0;
+        const MAX_STEPS: usize = 48;
+        let mut dense = Vec::with_capacity(self.points.len() * 2);
+        dense.push(self.points[0]);
+        let step = (self.min_distance * STEP_FACTOR).max(1e-3);
+        for index in 0..self.points.len() - 1 {
+            let (p1, w1) = self.points[index];
+            let (p2, w2) = self.points[index + 1];
+            let p0 = if index > 0 {
+                self.points[index - 1].0
+            } else {
+                doodle_types::Point::new(2.0 * p1.x - p2.x, 2.0 * p1.y - p2.y)
+            };
+            let p3 = if index + 2 < self.points.len() {
+                self.points[index + 2].0
+            } else {
+                doodle_types::Point::new(2.0 * p2.x - p1.x, 2.0 * p2.y - p1.y)
+            };
+            let steps = ((p1.distance(p2) / step).ceil() as usize).clamp(1, MAX_STEPS);
+            for step_index in 1..=steps {
+                let t = step_index as f64 / steps as f64;
+                dense.push((catmull_rom(p0, p1, p2, p3, t), w1 + (w2 - w1) * t as f32));
+            }
+        }
+        dense
+    }
+
     #[must_use]
     pub fn point_count(&self) -> usize {
         self.points.len()
@@ -270,6 +306,25 @@ impl StrokeBuilder {
     pub fn saw_hardware_pressure(&self) -> bool {
         self.saw_pressure
     }
+}
+
+/// Uniform Catmull-Rom interpolation between `p1` and `p2`, with `p0`/`p3` giving the tangents.
+fn catmull_rom(
+    p0: doodle_types::Point,
+    p1: doodle_types::Point,
+    p2: doodle_types::Point,
+    p3: doodle_types::Point,
+    t: f64,
+) -> doodle_types::Point {
+    let t2 = t * t;
+    let t3 = t2 * t;
+    let at = |a: f64, b: f64, c: f64, d: f64| {
+        0.5 * (2.0 * b
+            + (-a + c) * t
+            + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2
+            + (-a + 3.0 * b - 3.0 * c + d) * t3)
+    };
+    doodle_types::Point::new(at(p0.x, p1.x, p2.x, p3.x), at(p0.y, p1.y, p2.y, p3.y))
 }
 
 fn taper_factor(t: f64, start: f64, end: f64) -> f64 {
@@ -430,6 +485,36 @@ mod tests {
         }
         let (_, geometry) = builder.finish();
         assert!(geometry.points[0].width > geometry.points.last().expect("last").width);
+    }
+
+    #[test]
+    fn sparse_curved_samples_stay_curved_at_low_zoom() {
+        // A low zoom makes the accepted sample spacing (0.7 / zoom) large, so the builder sees
+        // only a few far-apart samples. The rendered geometry must still bend off the chord.
+        let mut builder = StrokeBuilder::new(
+            BrushSettings {
+                smoothing: 0.0,
+                ..BrushSettings::default()
+            },
+            RawSample::new(Point::new(0.0, 0.0), None, 0.0),
+            14.0,
+        );
+        builder.push(RawSample::new(Point::new(100.0, 0.0), None, 0.05));
+        builder.push(RawSample::new(Point::new(100.0, 100.0), None, 0.1));
+        let (_, geometry) = builder.finish();
+        assert!(
+            geometry.points.len() > 3,
+            "sparse samples were not refined: {} points",
+            geometry.points.len()
+        );
+        let off_chord = geometry
+            .points
+            .iter()
+            .any(|point| point.y < -1.0 && point.x > 1.0 && point.x < 99.0);
+        assert!(
+            off_chord,
+            "the first chord was rendered straight; no intermediate point left y = 0"
+        );
     }
 
     #[test]

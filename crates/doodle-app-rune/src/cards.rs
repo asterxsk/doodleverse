@@ -4,6 +4,7 @@ use rune::tok::{self, type_};
 use rune::{El, ScrollSpec, TextEdit, col, edit_access, el, row, text, text_input};
 
 use crate::app::{CHROME_BOTTOM_INSET, CHROME_TOP_INSET, DoodleApp};
+use crate::icons;
 use crate::theme::{self, Palette};
 
 pub struct CardUi {
@@ -268,8 +269,9 @@ pub fn card_views(s: &DoodleApp, pal: &Palette) -> Vec<El> {
             .child(avatar)
             .child(titles)
             .child(
-                theme::flat_button(format!("card-close-{id}"), "×", pal)
+                theme::flat_icon_button(format!("card-close-{id}"), pal)
                     .label("Close Dibby")
+                    .child(icons::icon("x", 16.0, pal.text))
                     .on_press(move |s: &mut DoodleApp| s.close_card(id)),
             );
         body = body.child(header);

@@ -1,82 +1,13 @@
 use doodle_render::GridKind;
+use doodle_types::StatementKind;
 use rune::{
-    Color, Cx, El, Key, KeyEvent, LineCap, ScrollSpec, Shape, Transition, Tx, canvas, col, el, row,
-    text,
+    Color, Cx, El, Key, KeyEvent, ScrollSpec, Transition, Tx, canvas, col, edit_access, el, row,
+    text, text_input,
 };
 
 use crate::app::{DoodleApp, NoticeKind, Target, Tool};
+use crate::icons;
 use crate::theme::{self, Palette};
-
-fn circle_points(center: [f32; 2], radius: f32, segments: usize) -> Vec<[f32; 2]> {
-    (0..segments)
-        .map(|index| {
-            let angle = std::f32::consts::TAU * index as f32 / segments as f32;
-            [
-                center[0] + angle.cos() * radius,
-                center[1] + angle.sin() * radius,
-            ]
-        })
-        .collect()
-}
-
-/// Pencil barrel outline, nib lines at the lower tip, and the ferrule crossbar.
-fn pencil_icon(ink: Color) -> Shape {
-    Shape::new()
-        .stroke_with(
-            vec![[4.8, 12.6], [6.2, 14.0], [12.6, 7.6], [11.2, 6.2]],
-            true,
-            1.3,
-            LineCap::Round,
-            ink,
-        )
-        .line([4.8, 12.6], [3.0, 14.4], 1.3, LineCap::Round, ink)
-        .line([6.2, 14.0], [3.0, 14.4], 1.3, LineCap::Round, ink)
-        .line([9.8, 7.6], [11.2, 9.0], 1.3, LineCap::Round, ink)
-}
-
-/// Cursor outline (a concave-sided pointer) plus its short tail.
-fn cursor_icon(ink: Color) -> Shape {
-    Shape::new()
-        .stroke_with(
-            vec![[4.4, 4.4], [7.4, 12.9], [9.0, 9.5], [12.4, 8.0]],
-            true,
-            1.4,
-            LineCap::Round,
-            ink,
-        )
-        .line([9.8, 9.8], [13.1, 13.1], 1.4, LineCap::Round, ink)
-}
-
-/// Four finger lines over a simplified palm curve.
-fn hand_icon(ink: Color) -> Shape {
-    Shape::new()
-        .line([5.2, 3.9], [5.2, 8.6], 1.4, LineCap::Round, ink)
-        .line([7.0, 3.3], [7.0, 8.6], 1.4, LineCap::Round, ink)
-        .line([8.8, 3.9], [8.8, 8.9], 1.4, LineCap::Round, ink)
-        .line([10.6, 4.9], [10.6, 9.4], 1.4, LineCap::Round, ink)
-        .stroke(
-            vec![
-                [4.3, 8.4],
-                [4.4, 10.6],
-                [5.6, 12.3],
-                [7.6, 13.3],
-                [9.6, 13.2],
-                [11.3, 12.0],
-                [12.3, 10.2],
-            ],
-            1.4,
-            ink,
-        )
-}
-
-/// Three vertical dots for the overflow trigger.
-fn dots_icon(ink: Color) -> Shape {
-    let mut shape = Shape::new();
-    for y in [3.5, 8.0, 12.5] {
-        shape = shape.fill(circle_points([8.0, y], 1.2, 12), ink);
-    }
-    shape
-}
 
 /// Default ink follows the board so a new stroke stays readable on a dark canvas.
 fn ink_rgba(light: bool) -> [u8; 4] {
@@ -142,6 +73,10 @@ pub fn view(s: &DoodleApp, _cx: &mut Cx<DoodleApp>) -> El {
         root = root.child(card);
     }
 
+    if let Some(editor) = inline_editor(s, &pal) {
+        root = root.child(editor);
+    }
+
     if s.menu_open {
         root = root.child(menu_scrim());
     }
@@ -158,9 +93,21 @@ pub fn view(s: &DoodleApp, _cx: &mut Cx<DoodleApp>) -> El {
         // the whole chrome.
         root = root.child(menu_island(s, &pal));
         root = root.child(toolbar_island(s, &pal));
+        // The brush pill is contextual chrome just below the toolbar, where Canvas settings and
+        // Shortcuts & about open; it steps aside while either panel is up instead of sitting
+        // under the panel's top edge.
+        if !s.show_settings && !s.show_help {
+            root = root.child(brush_pill(s, &pal));
+        }
         root = root.child(overflow_island(s, &pal));
-        root = root.child(status_island(s, &pal));
-        root = root.child(zoom_island(s, &pal));
+    }
+    // The bottom-left cluster is Excalidraw's zoom/undo group: it stays in zen mode.
+    root = root.child(bottom_cluster(s, &pal));
+    if s.minimap_open {
+        root = root.child(minimap_panel(s, &pal));
+    }
+    if let Some(notice) = notice_island(s, &pal) {
+        root = root.child(notice);
     }
 
     // Panels first, then popovers: a menu or overflow menu opened over a panel must paint above
@@ -170,7 +117,7 @@ pub fn view(s: &DoodleApp, _cx: &mut Cx<DoodleApp>) -> El {
         root = root.child(settings_panel(s, &pal));
     }
     if s.show_help {
-        root = root.child(help_panel(&pal, s.window_size[1]));
+        root = root.child(help_panel(s, &pal));
     }
 
     // Popovers sit above the islands and the panels so a menu opened near one is never clipped.
@@ -222,6 +169,74 @@ pub fn view(s: &DoodleApp, _cx: &mut Cx<DoodleApp>) -> El {
     root
 }
 
+/// The inline editor a Text or Sticky click opens: a single-line field at the click point.
+/// Return commits, Escape cancels, and a press anywhere on it stays off the board.
+fn inline_editor(s: &DoodleApp, pal: &Palette) -> Option<El> {
+    let editor = s.editor.as_ref()?;
+    let zoom = s.zoom();
+    let screen = s.camera.world_to_screen(editor.world, s.viewport());
+    let sticky = editor.kind == StatementKind::Sticky;
+    let width = if sticky {
+        (240.0 * zoom).max(150.0) as f32
+    } else {
+        (320.0 * zoom).max(160.0) as f32
+    };
+    let x = (screen.x as f32).clamp(12.0, (s.window_size[0] - width - 12.0).max(12.0));
+    let box_height = if sticky {
+        (160.0 * zoom).max(80.0) as f32
+    } else {
+        44.0
+    };
+    let y = (screen.y as f32).clamp(12.0, (s.window_size[1] - box_height - 12.0).max(12.0));
+    let (label, placeholder) = if sticky {
+        ("Sticky note", "Sticky note…")
+    } else {
+        ("Text", "Text…")
+    };
+    let ink = if sticky { pal.statement_ink } else { pal.text };
+    let field = text_input(&s.editor_edit, theme::body())
+        .key("inline-editor-field")
+        .label(label)
+        .on_edit(edit_access(|s: &mut DoodleApp| &mut s.editor_edit))
+        .on_submit(|s: &mut DoodleApp, _| s.commit_editor())
+        // The field's own key step runs before its editing step, so Escape reaches here rather
+        // than being taken as an end-editing key that leaves the editor mounted.
+        .on_input_key(|s: &mut DoodleApp, event, _| {
+            if event.key == Key::Escape {
+                s.cancel_editor();
+                true
+            } else {
+                false
+            }
+        })
+        .single_line()
+        .placeholder(placeholder, pal.muted)
+        .color(ink)
+        .caret(ink, pal.selection)
+        .w_full()
+        .autofocus();
+    let mut boxed = el()
+        .w(width)
+        .padding(8.0)
+        .radius(8.0)
+        .border(1.0, pal.selection)
+        .fill(if sticky {
+            theme::color([255, 241, 186, 255])
+        } else {
+            pal.card
+        })
+        .shadow(7.0, 14.0, pal.shadow)
+        // The editor is a press target in its own right: clicking it must never reach the
+        // canvas and start a stroke or another object.
+        .hit()
+        .on_press(|_: &mut DoodleApp| {})
+        .child(field);
+    if sticky {
+        boxed = boxed.h((160.0 * zoom).max(80.0) as f32);
+    }
+    Some(el().key("inline-editor").absolute(x, y).child(boxed))
+}
+
 fn empty_hint(s: &DoodleApp, pal: &Palette) -> El {
     let top = (s.window_size[1] * 0.42).max(80.0);
     col()
@@ -233,7 +248,7 @@ fn empty_hint(s: &DoodleApp, pal: &Palette) -> El {
         .hit()
         // The hint is a full-width hit layer above the canvas, so it hears wheels before the
         // canvas does. Hand them to the same board routine; returning its `true` stops the
-        // canvas handler below from panning a second time.
+        // canvas handler below from zooming a second time.
         .on_wheel(|s: &mut DoodleApp, event, _| s.wheel(&event))
         .child(
             text("Draw anywhere")
@@ -241,7 +256,7 @@ fn empty_hint(s: &DoodleApp, pal: &Palette) -> El {
                 .color(pal.muted),
         )
         .child(
-            text("B brush · V select · H hand · wheel pans · Ctrl+wheel zooms")
+            text("P pen · V select · R rectangle · T text · N sticky · E eraser · scroll zooms")
                 .font(theme::body())
                 .color(pal.muted),
         )
@@ -339,7 +354,7 @@ fn menu_popover(pal: &Palette) -> El {
         theme::menu_row("menu-settings", "Canvas settings…", pal)
             .w_full()
             .on_press(|s: &mut DoodleApp| {
-                s.show_settings = true;
+                s.open_settings();
                 s.menu_open = false;
             }),
     );
@@ -355,35 +370,91 @@ fn menu_popover(pal: &Palette) -> El {
         .child(items)
 }
 
+fn tool_icon(tool: Tool, ink: Color) -> El {
+    let name = match tool {
+        Tool::Draw => "pencil",
+        Tool::Select => "mouse-pointer-2",
+        Tool::Hand => "hand",
+        Tool::Eraser => "eraser",
+        Tool::Rectangle => "square",
+        Tool::Diamond => "diamond",
+        Tool::Ellipse => "circle",
+        Tool::Arrow => "arrow-right",
+        Tool::Line => "minus",
+        Tool::Sticky => "sticky-note",
+        Tool::Text => "type",
+    };
+    icons::icon(name, 16.0, ink)
+}
+
+/// One drawing tool in the toolbar: name, key badge and tooltip.
+fn tool_item(s: &DoodleApp, pal: &Palette, tool: Tool, name: &str, key: &str) -> El {
+    let selected = s.tool == tool;
+    let ink = if selected { pal.selected_ink } else { pal.text };
+    theme::tool_button(format!("tool-{tool:?}"), selected, pal)
+        .label(name)
+        .help(name)
+        .help_keys([key])
+        .child(tool_icon(tool, ink))
+        .child(theme::key_badge(key, pal))
+        .on_press(move |s: &mut DoodleApp| {
+            dismiss_popovers(s);
+            s.set_tool(tool);
+        })
+}
+
 fn toolbar_island(s: &DoodleApp, pal: &Palette) -> El {
     let mut bar = row().gap(4.0).items_center();
-    for tool in [Tool::Draw, Tool::Select, Tool::Hand] {
-        let selected = s.tool == tool;
-        let ink = if selected { pal.selected_ink } else { pal.text };
-        let (name, icon) = match tool {
-            Tool::Draw => ("Draw", pencil_icon(ink)),
-            Tool::Select => ("Select", cursor_icon(ink)),
-            Tool::Hand => ("Hand", hand_icon(ink)),
-        };
-        bar = bar.child(
-            theme::tool_button(format!("tool-{:?}", tool), selected, pal)
-                .label(name)
-                .child(canvas(icon).size(16.0, 16.0))
-                .on_press(move |s: &mut DoodleApp| {
-                    dismiss_popovers(s);
-                    s.tool = tool;
-                    if tool != Tool::Draw {
-                        s.stroke = None;
-                    }
-                }),
-        );
+    let locked = s.toolbar_locked;
+    let lock_ink = if locked { pal.selected_ink } else { pal.text };
+    bar = bar.child(
+        theme::tool_button("tool-Lock", locked, pal)
+            .label("Lock toolbar")
+            .help("Lock toolbar")
+            .help_keys(["Q"])
+            .child(icons::icon("lock", 16.0, lock_ink))
+            .child(theme::key_badge("Q", pal))
+            .on_press(|s: &mut DoodleApp| {
+                dismiss_popovers(s);
+                s.toolbar_locked = !s.toolbar_locked;
+            }),
+    );
+    bar = bar.child(theme::divider_v(pal));
+    for (tool, name, key) in [
+        (Tool::Hand, "Hand", "H"),
+        (Tool::Select, "Select", "V"),
+        (Tool::Rectangle, "Rectangle", "R"),
+        (Tool::Diamond, "Diamond", "D"),
+        (Tool::Ellipse, "Ellipse", "O"),
+        (Tool::Arrow, "Arrow", "A"),
+        (Tool::Line, "Line", "L"),
+        // "P" is the pen's shown binding; "B" still switches to it.
+        (Tool::Draw, "Pen", "P"),
+        (Tool::Text, "Text", "T"),
+        (Tool::Sticky, "Sticky", "N"),
+        (Tool::Eraser, "Eraser", "E"),
+    ] {
+        bar = bar.child(tool_item(s, pal, tool, name, key));
     }
     bar = bar.child(theme::divider_v(pal));
-    bar = bar.child(
-        text(format!("{:.0} px", s.brush.base_width))
-            .font(theme::caption())
-            .color(pal.muted),
-    );
+    let card = if locked {
+        // Locked means no mount or position animation at all: the bar is pinned and stays put
+        // through card open/close and resize.
+        island(pal).instant_changes().transition(Transition::none())
+    } else {
+        island(pal)
+    };
+    el().key("toolbar-island")
+        .absolute(0.0, 10.0)
+        .w_full()
+        .justify_center()
+        .child(card.child(bar))
+}
+
+/// Brush size and colour swatches, in a compact pill just under the toolbar.
+fn brush_pill(s: &DoodleApp, pal: &Palette) -> El {
+    let mut bar = row().gap(6.0).items_center();
+    bar = bar.child(text("Size").font(theme::caption()).color(pal.muted));
     bar = bar.child(slider(
         pal,
         "brush-size",
@@ -393,6 +464,11 @@ fn toolbar_island(s: &DoodleApp, pal: &Palette) -> El {
         Target::BrushSize,
         s.slider_value_text(Target::BrushSize),
     ));
+    bar = bar.child(
+        text(format!("{:.0} px", s.brush.base_width))
+            .font(theme::caption())
+            .color(pal.muted),
+    );
     bar = bar.child(theme::divider_v(pal));
     let mut colors = row().gap(4.0).items_center();
     for (key, name, rgba) in swatches(s.light_theme) {
@@ -403,17 +479,18 @@ fn toolbar_island(s: &DoodleApp, pal: &Palette) -> El {
                 .on_press(move |s: &mut DoodleApp| {
                     dismiss_popovers(s);
                     s.color = rgba;
-                    s.tool = Tool::Draw;
+                    s.set_tool(Tool::Draw);
                 }),
         );
     }
     bar = bar.child(colors);
-    bar = bar.child(theme::divider_v(pal));
-    bar = bar.child(history_row(s, pal));
-    el().key("toolbar-island")
-        .absolute(0.0, 10.0)
+    el().key("brush-pill")
+        .absolute(0.0, 64.0)
         .w_full()
         .justify_center()
+        // Contextual chrome: it leaves and returns with the panel that displaced it, so its exit
+        // fade can never sit under a fading-in panel's top edge.
+        .transition(Transition::none())
         .child(island(pal).child(bar))
 }
 
@@ -422,12 +499,12 @@ fn history_row(s: &DoodleApp, pal: &Palette) -> El {
     let redo_depth = s.doc.redo_depth();
     // Rune keeps a disabled element's role and name when both are set explicitly, so the
     // undo/redo buttons read as disabled buttons rather than anonymous groups.
-    let mut undo = theme::flat_button("undo", "Undo", pal)
-        .h(36.0)
-        .label("Undo");
-    let mut redo = theme::flat_button("redo", "Redo", pal)
-        .h(36.0)
-        .label("Redo");
+    let mut undo = theme::flat_icon_button("undo", pal)
+        .label("Undo")
+        .child(icons::icon("undo-2", 16.0, pal.text));
+    let mut redo = theme::flat_icon_button("redo", pal)
+        .label("Redo")
+        .child(icons::icon("redo-2", 16.0, pal.text));
     if undo_depth > 0 {
         undo = undo.on_press(|s: &mut DoodleApp| {
             dismiss_popovers(s);
@@ -447,6 +524,109 @@ fn history_row(s: &DoodleApp, pal: &Palette) -> El {
         redo = redo.opacity(0.4).role("button").disabled(true).hit();
     }
     row().gap(4.0).items_center().child(undo).child(redo)
+}
+
+/// A 28×28 icon button for the bottom-left cluster.
+fn cluster_button(key: &str, label: &str, selected: bool, pal: &Palette, icon: &str) -> El {
+    let ink = if selected { pal.selected_ink } else { pal.text };
+    theme::tool_button(key, selected, pal)
+        .size(28.0, 28.0)
+        .label(label)
+        .help(label)
+        .child(icons::icon(icon, 15.0, ink))
+}
+
+fn bottom_cluster(s: &DoodleApp, pal: &Palette) -> El {
+    let mut bar = row().gap(4.0).items_center();
+    bar = bar.child(
+        text(format!("{:.0}%", s.zoom() * 100.0))
+            .font(theme::caption())
+            .color(pal.muted)
+            .w(42.0),
+    );
+    bar = bar.child(
+        cluster_button(
+            "board-settings",
+            "Board settings",
+            s.show_settings,
+            pal,
+            "book-open",
+        )
+        .on_press(|s: &mut DoodleApp| {
+            dismiss_popovers(s);
+            s.toggle_settings();
+        }),
+    );
+    bar = bar.child(
+        cluster_button("minimap-toggle", "Minimap", s.minimap_open, pal, "map").on_press(
+            |s: &mut DoodleApp| {
+                dismiss_popovers(s);
+                s.toggle_minimap();
+            },
+        ),
+    );
+    bar = bar.child(theme::divider_v(pal));
+    bar = bar.child(history_row(s, pal));
+    el().key("bottom-cluster")
+        .pin(Some(12.0), None, None, Some(10.0))
+        .h(36.0)
+        .padding(4.0)
+        .radius(8.0)
+        .fill(pal.card)
+        .border(1.0, pal.border)
+        .shadow(7.0, 14.0, pal.shadow)
+        .hit()
+        .child(bar)
+}
+
+/// The minimap panel above the bottom-left cluster. It is a persistent panel, not a popover:
+/// the toggle button opens and closes it, and Escape leaves it alone.
+///
+/// Wheel over the panel is ignored (the panel consumes it) rather than zooming the board; the
+/// board still zooms normally everywhere outside the panel.
+fn minimap_panel(s: &DoodleApp, pal: &Palette) -> El {
+    let [x, y, width, height] = s.minimap_rect();
+    theme::island(pal)
+        .key("minimap-panel")
+        // Foreground panels replace each other in the same commit; entering and leaving at once
+        // keeps the closing one from fading over the one that opened.
+        .transition(Transition::none())
+        .absolute(x, y)
+        .padding(0.0)
+        .w(width)
+        .h(height)
+        .clip_rounded(8.0)
+        .child(
+            canvas(crate::canvas::minimap_scene(s, pal))
+                .size(width, height)
+                .radius(8.0)
+                .label("Minimap")
+                .cursor(rune::Cursor::Pointer)
+                .on_drag(|s: &mut DoodleApp, drag, _| s.minimap_drag(drag))
+                // Documented choice: wheel over the minimap is ignored.
+                .on_wheel(|_: &mut DoodleApp, _, _| true),
+        )
+}
+
+/// Transient messages float above the bottom-left cluster (and above the minimap when it is
+/// open), replacing the removed status pill's notice slot.
+fn notice_island(s: &DoodleApp, pal: &Palette) -> Option<El> {
+    let (message, kind) = s.notice_text()?;
+    let bottom = if s.minimap_open { 206.0 } else { 54.0 };
+    Some(
+        island(pal)
+            .key("notice-island")
+            .pin(Some(12.0), None, None, Some(bottom))
+            .child(
+                text(message)
+                    .font(theme::caption())
+                    .color(if kind == NoticeKind::Error {
+                        pal.danger
+                    } else {
+                        pal.text
+                    }),
+            ),
+    )
 }
 
 fn overflow_island(s: &DoodleApp, pal: &Palette) -> El {
@@ -471,7 +651,7 @@ fn overflow_island(s: &DoodleApp, pal: &Palette) -> El {
             s.overflow_open = !s.overflow_open;
         })
         .on_drag(|s: &mut DoodleApp, drag, _| s.popover_trigger_drag(drag))
-        .child(canvas(dots_icon(ink)).size(16.0, 16.0));
+        .child(icons::icon("ellipsis-vertical", 16.0, ink));
     island(pal)
         .key("overflow-island")
         .pin(None, Some(12.0), Some(10.0), None)
@@ -501,7 +681,7 @@ fn overflow_popover(s: &DoodleApp, pal: &Palette) -> El {
         theme::menu_row("settings", "Canvas settings", pal)
             .w_full()
             .on_press(|s: &mut DoodleApp| {
-                s.show_settings = !s.show_settings;
+                s.toggle_settings();
                 s.overflow_open = false;
             }),
     );
@@ -526,12 +706,17 @@ fn overflow_popover(s: &DoodleApp, pal: &Palette) -> El {
         );
     }
     items = items.child(
-        theme::menu_row("menu-help", "Shortcuts & about", pal)
-            .w_full()
-            .on_press(|s: &mut DoodleApp| {
-                s.show_help = true;
-                s.overflow_open = false;
-            }),
+        theme::menu_row_icon(
+            "menu-help",
+            "Shortcuts & about",
+            "circle-question-mark",
+            pal,
+        )
+        .w_full()
+        .on_press(|s: &mut DoodleApp| {
+            s.open_help();
+            s.overflow_open = false;
+        }),
     );
     items = items.child(theme::divider_h(pal));
     items = items.child(
@@ -554,87 +739,11 @@ fn overflow_popover(s: &DoodleApp, pal: &Palette) -> El {
         .child(items)
 }
 
-fn plural(count: usize, singular: &str) -> String {
-    if count == 1 {
-        format!("{count} {singular}")
-    } else {
-        format!("{count} {singular}s")
-    }
-}
-
-fn status_island(s: &DoodleApp, pal: &Palette) -> El {
-    let mut content = row().gap(8.0).items_center();
-    content = content.child(text("Local only").font(theme::caption()).color(pal.muted));
-    content = content.child(
-        text("· in memory until export")
-            .font(theme::caption())
-            .color(pal.muted),
-    );
-    if s.dirty() {
-        content = content.child(text("· unsaved").font(theme::caption()).color(pal.accent));
-    }
-    content = content.child(
-        text(format!(
-            "· {} · {}",
-            plural(s.projection.objects.len(), "object"),
-            plural(s.projection.total_stroke_points, "point")
-        ))
-        .font(theme::caption())
-        .color(pal.muted),
-    );
-    if let Some((message, kind)) = s.notice_text() {
-        content = content.child(text(message).font(theme::caption()).color(
-            if kind == NoticeKind::Error {
-                pal.danger
-            } else {
-                pal.text
-            },
-        ));
-    }
-    island(pal)
-        .key("status-island")
-        .pin(Some(12.0), None, None, Some(10.0))
-        .child(content)
-}
-
-fn zoom_island(s: &DoodleApp, pal: &Palette) -> El {
-    let content = row()
-        .gap(6.0)
-        .items_center()
-        .child(
-            theme::flat_button("zoom-out", "−", pal).on_press(|s: &mut DoodleApp| {
-                dismiss_popovers(s);
-                s.zoom_from_center(1.0 / 1.2);
-            }),
-        )
-        .child(
-            text(format!("{:.0}%", s.zoom() * 100.0))
-                .font(theme::caption())
-                .color(pal.muted)
-                .w(46.0),
-        )
-        .child(
-            theme::flat_button("zoom-in", "+", pal).on_press(|s: &mut DoodleApp| {
-                dismiss_popovers(s);
-                s.zoom_from_center(1.2);
-            }),
-        )
-        .child(
-            theme::flat_button("zoom-fit", "Fit", pal).on_press(|s: &mut DoodleApp| {
-                dismiss_popovers(s);
-                s.fit_to_content();
-            }),
-        );
-    island(pal)
-        .key("zoom-island")
-        .pin(None, None, Some(12.0), Some(10.0))
-        .child(content)
-}
-
 fn zen_hint(pal: &Palette) -> El {
+    // Top-left: the bottom-left corner belongs to the cluster in zen mode too.
     island(pal)
         .key("zen-hint")
-        .pin(Some(12.0), None, None, Some(12.0))
+        .pin(Some(12.0), Some(12.0), None, None)
         .child(
             theme::flat_button("zen-exit", "Zen mode · Alt+Z to show the UI", pal)
                 .on_press(|s: &mut DoodleApp| s.zen = false),
@@ -891,7 +1000,9 @@ fn settings_panel(s: &DoodleApp, pal: &Palette) -> El {
                 .grow(1.0),
         )
         .child(
-            theme::flat_button("settings-close", "×", pal)
+            theme::flat_icon_button("settings-close", pal)
+                .label("Close settings")
+                .child(icons::icon("x", 16.0, pal.text))
                 .on_press(|s: &mut DoodleApp| s.show_settings = false),
         );
     body = col()
@@ -903,6 +1014,9 @@ fn settings_panel(s: &DoodleApp, pal: &Palette) -> El {
 
     theme::island_col(pal)
         .key("settings-panel")
+        // Foreground panels replace each other in the same commit; entering and leaving at once
+        // keeps the closing one from fading over the one that opened.
+        .transition(Transition::none())
         .absolute(140.0, 84.0)
         .w(320.0)
         .h(height)
@@ -913,8 +1027,10 @@ fn settings_panel(s: &DoodleApp, pal: &Palette) -> El {
         .child(body)
 }
 
-fn help_panel(pal: &Palette, window_height: f32) -> El {
-    let height = (window_height - 140.0).clamp(240.0, 620.0);
+fn help_panel(s: &DoodleApp, pal: &Palette) -> El {
+    // The same rect `DoodleApp::help_rect` guards the wheel with, so the panel's scroll view
+    // always wins over the board zoom.
+    let [x, y, width, height] = s.help_rect().unwrap_or([220.0, 120.0, 420.0, 480.0]);
     // Sticky header, as on the settings panel, so Close stays reachable however short the
     // window is and however far the body scrolls.
     let header = row()
@@ -930,7 +1046,9 @@ fn help_panel(pal: &Palette, window_height: f32) -> El {
                 .grow(1.0),
         )
         .child(
-            theme::flat_button("help-close", "Close", pal)
+            theme::flat_icon_button("help-close", pal)
+                .label("Close")
+                .child(icons::icon("x", 16.0, pal.text))
                 .on_press(|s: &mut DoodleApp| s.show_help = false),
         );
     let mut body = col()
@@ -954,10 +1072,19 @@ fn help_panel(pal: &Palette, window_height: f32) -> El {
     );
     body = body.child(theme::section("Shortcuts", pal));
     for (key, action) in [
-        ("B / V / H", "Brush / Select / Hand"),
-        ("Wheel", "Pan the board"),
+        ("P (or B) / V / H / E", "Pen / Select / Hand / Eraser"),
+        (
+            "R / D / O / A / L",
+            "Rectangle / Diamond / Ellipse / Arrow / Line",
+        ),
+        ("T / N", "Text / Sticky note"),
+        ("Q", "Lock the toolbar in place"),
+        ("Wheel", "Zoom at the pointer"),
         ("Ctrl+wheel or pinch", "Zoom at the pointer"),
+        ("Shift+wheel", "Pan horizontally"),
+        ("Hand tool or middle drag", "Pan the board"),
         ("Shift+click", "Toggle selection"),
+        ("Shift+drag a shape", "Constrain to square, circle or 45°"),
         ("Ctrl+A", "Select all"),
         ("Delete", "Delete selection"),
         ("Ctrl+G", "Group selection"),
@@ -966,7 +1093,7 @@ fn help_panel(pal: &Palette, window_height: f32) -> El {
         ("F / 0", "Fit content / reset view"),
         ("Alt+Z", "Zen mode"),
         ("Ctrl+O / Ctrl+S", "Open / export board"),
-        ("Esc", "Cancel stroke, drag, or import"),
+        ("Esc", "Cancel editor, stroke, drag, or import"),
     ] {
         body = body.child(
             row()
@@ -977,7 +1104,8 @@ fn help_panel(pal: &Palette, window_height: f32) -> El {
                     text(action)
                         .font(theme::caption())
                         .color(pal.text)
-                        .grow(1.0),
+                        .grow(1.0)
+                        .wrap(),
                 ),
         );
     }
@@ -1005,8 +1133,11 @@ fn help_panel(pal: &Palette, window_height: f32) -> El {
     );
     theme::island_col(pal)
         .key("help-panel")
-        .absolute(220.0, 120.0)
-        .w(420.0)
+        // Foreground panels replace each other in the same commit; entering and leaving at once
+        // keeps the closing one from fading over the one that opened.
+        .transition(Transition::none())
+        .absolute(x, y)
+        .w(width)
         .h(height)
         .radius(12.0)
         .padding(16.0)

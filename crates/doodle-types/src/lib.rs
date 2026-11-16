@@ -14,8 +14,8 @@ pub use geometry::{Point, Rect};
 pub use ids::{ImportId, ObjectId, PeerId, RequestId, RoomId};
 pub use limits::*;
 pub use objects::{
-    BoardSnapshot, ObjectKind, Pose, StatementObject, StatementStyle, StoredObject, StrokeGeometry,
-    StrokeObject, StrokePoint, StrokeStyle,
+    BoardSnapshot, ObjectKind, Pose, ShapeKind, ShapeObject, StatementKind, StatementObject,
+    StatementStyle, StoredObject, StrokeGeometry, StrokeObject, StrokePoint, StrokeStyle,
 };
 pub use version::{
     APP_VERSION, DOCUMENT_SCHEMA_VERSION, ENVELOPE_VERSION, GEOMETRY_SCHEMA_VERSION,

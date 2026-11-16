@@ -94,19 +94,21 @@ Two front ends sit on the same crates. `doodle-app` is the original eframe/egui 
 `958743308f36fdf1c568c513badc96ddb0c7f040`.
 
 Both draw one full-window canvas layer and absolutely positioned islands above it: a menu
-island (Doodleverse / Ask Dibby / Export), a vertical tool island (Brush, Select, Hand, six
-swatches, size slider, Undo/Redo), a right-pinned action island (Group, Ungroup, Fit,
-Settings), and bottom status/zoom islands. `Alt+Z` hides every island, closes any open panel,
-and leaves one hint; the same shortcut restores them. Settings is a fixed-height column panel
-with a sticky header and close button, help is a floating panel, and close/pin are centered modals.
+island (Doodleverse / Ask Dibby / Export), a centred horizontal toolbar (pen, select, hand,
+eraser with key badges, six swatches, size slider, Undo/Redo), a right-pinned action island
+(Group, Ungroup, Fit, Settings), and bottom status/zoom islands. `Alt+Z` hides every island,
+closes any open panel, and leaves one hint; the same shortcut restores them. Settings is a
+fixed-height column panel with a sticky header and close button, help is a floating panel, and
+close/pin are centered modals.
 
 The Rune shell keeps its own small state machine in `app.rs` (`DoodleApp`) mirroring the
 eframe state, with `view.rs` building the element tree, `canvas.rs` drawing the grid and
 strokes into one `Shape`, `cards.rs` rendering AI cards, and `theme.rs` holding the light/dark
-palettes. Input precedence matches the eframe shell: pending import ghost, active stroke,
-active move, marquee, then idle shortcuts. Text fields consume keyboard input first. The
-canvas owns the wheel unless the pointer is over the settings panel, whose scroll view
-takes it; island roots are hit-testable so clicks never fall through to the board.
+palettes. Input precedence matches the eframe shell: pending import ghost, active stroke or
+erase gesture, active move, marquee, then idle shortcuts. Text fields consume keyboard input
+first. The canvas zooms on the wheel around the pointer, unless the pointer is over the
+settings or help panel or an AI card, whose scroll views take it; `Shift`+wheel pans
+horizontally. Island roots are hit-testable so clicks never fall through to the board.
 
 Rune has no per-vertex canvas mesh, so a pressure stroke is emitted as one `line` shape per
 segment, each with its own averaged width and round caps. That approximates the eframe

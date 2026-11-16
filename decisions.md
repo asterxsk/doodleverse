@@ -353,6 +353,72 @@ and credentials (B02–B04), OS vault and non-Windows pen pressure (B05), packag
 and PR/release publication (B07). Pushing checkpoints to the authorized GitHub remote is not
 blocked and continues.
 
+### D31 — Shapes, text and sticky are document objects, not chrome
+- **Because:** the user asked for the full Excalidraw toolset. `ShapeObject { shape, width,
+  height, flip_x, flip_y, style }` covers rectangle, diamond, ellipse, arrow and line in one
+  kind; text and sticky reuse `StatementObject` with an appended `StatementKind`. Appending
+  variants and trailing fields keeps old payloads readable; the schema version stays 1.
+- **Alternatives:** rasterising shapes into strokes (loses editability and export fidelity);
+  a new document format (breaks every existing board).
+- **Reversibility:** additive — new variants and fields decode with defaults.
+- **Risk if wrong:** older builds cannot read boards that contain shapes or the new statement
+  byte; recorded as a deliberate forward-compatibility break.
+
+### D32 — One foreground panel at a time
+- **Because:** settings, help and the minimap each floated independently and overlapped each
+  other, the brush pill and, at 880pt, the Ask Dibby card. Opening one now closes the other two;
+  the brush pill hides while a panel is open; help repositions around an open card instead of
+  closing it.
+- **Alternatives:** allow stacking with z-order rules (still unreadable at 880pt); close cards
+  when help opens (loses draft content).
+- **Reversibility:** cheap — state transitions in `app.rs` and render guards in `view.rs`.
+- **Risk if wrong:** users cannot compare settings and the minimap side by side.
+
+### D33 — Lucide for UI icons
+- **Because:** the hand-drawn icons were approximations. Lucide is ISC-licensed, free for
+  commercial use, drawn on a 24px stroke grid, and its SVGs are simple path data. Nineteen SVGs
+  are vendored under `assets/icons/lucide/` with the licence and a source note; a small SVG path
+  parser (including arc-to-cubic) renders them through `rune::Path`.
+- **Alternatives:** Feather (smaller set), Phosphor (heavier), bundling an icon font (licensing
+  and extra dependency).
+- **Reversibility:** cheap — swap the vendored SVGs and the name mapping.
+- **Risk if wrong:** icon paths Rune cannot tessellate; mitigated by parser tests and screenshots.
+
+### D34 — Tool-specific cursors, canvas-drawn eraser circle and tail, wheel-up zooms in
+- **Because:** the user asked for a cursor per tool (precision crosshair for shapes, custom pen
+  and note cursors, default arrow for select, hand for hand and middle-drag, I-beam for text,
+  translucent circle for eraser) and a fixed-length translucent tail following the eraser. The
+  eraser feedback is drawn on the canvas rather than as a cursor image, so the circle exactly
+  matches the erase radius at every zoom and can carry a separate tail alpha; the OS cursor is
+  hidden only over the board while the eraser is active. Wheel-up is defined as zoom-in, wheel-down
+  as zoom-out, in both scroll conventions.
+- **Alternatives:** an eraser cursor PNG (fixed pixel size, cannot track zoom or the real hit
+  radius, and no tail); leaving wheel direction to the platform default (the reporter saw the
+  opposite of the expected direction).
+- **Reversibility:** cheap — cursor mapping in `app.rs`/`view.rs`, one canvas overlay, one wheel
+  sign.
+- **Risk if wrong:** a hidden cursor with no overlay on a platform where canvas overlays fail
+  would leave the eraser invisible; the overlay is the same scene pass as strokes, so this is
+  covered by the headless frames.
+
+### D35 — Linear-cost scene batching and low-zoom stroke fidelity
+- **Because:** the canvas rebuilt its whole `rune::Shape` by cloning once per grid mark and once
+  per stroke segment (`shape = shape.clone().fill(...)`), so a frame cost O(N²) in marks. The grid
+  allows up to 18,000 marks and the visible field grows as zoom decreases, which matches the
+  reported "exponentially laggier the further out I zoom". The same stalls starve pointer events,
+  so freehand strokes collapse to straight chords at low zoom. Grid marks and stroke segments are
+  now batched into a few `Path`s (one fill for all dots, one stroke path for pluses/lines, width
+  buckets for pressure-varying strokes), the mark budget is lowered and the LOD spacing made
+  coarser at extreme zoom-out, and sparse pointer samples are subdivided/curved so curvature
+  survives at 5–10 % zoom.
+- **Alternatives:** keep per-mark shapes and only lower the cap (still O(N²) and visibly sparse);
+  rasterise the grid into a texture (more platform surface, harder theming); leave strokes as
+  straight segments and accept the fidelity loss (rejected by the user).
+- **Reversibility:** cheap — the batching lives in `canvas.rs`; the grid budget is a constant in
+  `doodle-render`.
+- **Risk if wrong:** batching can merge joins visually (mitigated by round caps and width buckets)
+  and over-smoothing can invent curvature (bounded interpolation, tests on sparse curves).
+
 ## Overnight close-out (2026-11-16, second session)
 
 **Shipped:** the Excalidraw top bar in `1faf8be` (board menu top left, centred horizontal icon

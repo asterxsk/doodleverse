@@ -13,18 +13,26 @@ original eframe/egui shell stays in the workspace as a second front end over the
 
 ## What works today
 
-- **Infinite canvas** with cursor-anchored zoom, wheel/hand-tool panning (space- and
-  middle-drag in the eframe shell), and a bounded level-of-detail grid (dots, pluses, lines, or
-  none).
+- **Infinite canvas** with cursor-anchored wheel zoom (plain wheel, `Ctrl`/`Cmd`+wheel, or
+  pinch), `Shift`+wheel horizontal panning, and hand- or middle-drag panning, over a bounded
+  level-of-detail grid (dots, pluses, lines, or none).
 - **Pressure-aware brush.** Mouse strokes simulate pressure from speed and progress. On
   Windows, tablet pen pressure is read from the native pointer stack and applied per sample.
+- **Excalidraw toolset.** Rectangle, diamond, ellipse, arrow and line shapes (Shift constrains),
+  text blocks and sticky notes with an inline editor, and a whole-object eraser where one drag
+  is one undo step. Tools are `Q` lock, `H` hand, `V` select, `R` rectangle, `D` diamond,
+  `O` ellipse, `A` arrow, `L` line, `P` pen (`B` also works), `T` text, `N` sticky, `E` eraser.
+  The pointer matches the tool (crosshair for shapes, pen and note cursors, I-beam for text,
+  grab for hand and middle-drag); the eraser paints its hit disc plus a short translucent tail.
+  Freehand point samples are curved at low zoom, and the grid and stroke paths are batched so
+  deep zoom-out stays linear-cost.
 - **Selection and structure.** Marquee/click selection, move, delete, group, ungroup,
   select all, and command-level undo/redo that never records remote CRDT edits.
 - **Board theming** with presets and custom colors, grid spacing/opacity/color, dot/plus
   size and line width.
-- **Excalidraw-style top toolbar** with icon tools (`B` brush, `V` select, `H` hand), brush
-  size, colour swatches and undo/redo, a board menu top left, and a three-dot menu top right
-  for group, fit, canvas settings, help and `Alt+Z` zen mode.
+- **Excalidraw-style chrome.** A centred icon toolbar with key badges and a lock that pins it,
+  a board menu top left, a three-dot menu top right, and a bottom-left cluster holding zoom,
+  canvas settings, the minimap and undo/redo. Icons are [Lucide](https://lucide.dev) (ISC).
 - **Portable files.** `.doodleverse` export uses a versioned envelope with CRC validation.
   Import validates the whole payload, remaps every identity, and places the board at the
   origin (empty canvas) or as a validated ghost preview (non-empty canvas).
@@ -67,19 +75,23 @@ test never covers the primary display.
 
 | Input | Action |
 | --- | --- |
-| `B` / `V` | Brush / Select |
-| Left drag | Draw, move selection, or marquee |
+| `Q` / `H` / `V` / `E` | Lock toolbar / Hand / Select / Eraser |
+| `R` / `D` / `O` / `A` / `L` | Rectangle / Diamond / Ellipse / Arrow / Line |
+| `P` (or `B`) / `T` / `N` | Pen / Text / Sticky note |
+| Left drag | Draw, draw a shape (Shift constrains), move selection, marquee, or erase whole objects |
+| Middle drag | Pan the board with any tool |
 | `Shift` + click | Toggle selection |
 | `Ctrl+A` | Select all top-level objects |
 | `Delete` / `Backspace` | Delete selection |
 | `Ctrl+G` / `Ctrl+Shift+G` | Group / ungroup selection |
 | `Ctrl+Z` / `Ctrl+Y` or `Ctrl+Shift+Z` | Undo / redo |
-| `H` | Hand tool (drag to pan) |
-| Wheel or trackpad scroll | Pan |
-| `Ctrl`/`Cmd` + wheel, or pinch | Zoom at cursor |
+| Hand tool drag | Pan the board |
+| Wheel or trackpad scroll | Zoom at the cursor |
+| `Ctrl`/`Cmd` + wheel, or pinch | Zoom at the cursor |
+| `Shift` + wheel | Pan horizontally |
 | `F` / `0` | Fit content / reset view |
 | `Alt+Z` | Toggle Excalidraw-style zen mode |
-| `Esc` | Cancel stroke, drag, marquee, or pending import |
+| `Esc` | Cancel stroke, drag, marquee, erase, or pending import |
 
 ## The board file
 
@@ -136,4 +148,5 @@ pointer pressure inside the app window.
 
 ## License
 
-MIT OR Apache-2.0.
+MIT OR Apache-2.0. UI icons are from [Lucide](https://lucide.dev) under the ISC licence; the
+notice and the vendored SVGs live in `assets/icons/`.

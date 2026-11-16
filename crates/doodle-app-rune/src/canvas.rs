@@ -1,11 +1,37 @@
+use std::collections::BTreeMap;
+
 use doodle_render::grid_frame;
-use doodle_types::{ObjectKind, Point, Pose, Rect, StrokeGeometry};
-use rune::{Color, Cursor, El, LineCap, Shape, canvas};
+use doodle_types::{
+    ObjectKind, Point, Pose, Rect, ShapeKind, ShapeObject, StatementKind, StrokeGeometry,
+};
+use rune::{Color, Cursor, CursorImage, El, LineCap, Path, PointerButton, Shape, canvas};
 
 use crate::app::DoodleApp;
 use crate::theme::{self, Palette};
 
+use doodle_canvas::{
+    arrow_head_segments, diamond_points, ellipse_points, line_endpoints, rectangle_points,
+    shape_bounds,
+};
+
 const MAX_SEGMENTS: usize = 200_000;
+
+/// Screen-point cap on grid marks drawn per frame. `grid_frame` also keeps marks at least 16
+/// screen points apart, so this only guards against a sudden viewport or settings change.
+const GRID_MARK_CAP: usize = 4_000;
+
+/// Below this zoom the grid fades out entirely; the fade starts at [`GRID_FADE_END`]. At such a
+/// distance the grid is noise, and dropping it removes thousands of marks from the frame.
+const GRID_HIDE_BELOW: f64 = 0.02;
+const GRID_FADE_END: f64 = 0.05;
+
+/// The pen and sticky-note cursors: 64x64 PNGs at 2x, dark ink with a white halo.
+const PEN_CURSOR: CursorImage =
+    CursorImage::png(include_bytes!("../assets/cursors/pen.png"), [4.5, 27.5]);
+const STICKY_CURSOR: CursorImage = CursorImage::png(
+    include_bytes!("../assets/cursors/sticky-note.png"),
+    [3.0, 3.0],
+);
 
 fn s_color(rgba: [u8; 4]) -> Color {
     theme::color(rgba)
@@ -68,10 +94,14 @@ pub fn scene(s: &DoodleApp, pal: &Palette) -> Shape {
     let mut shape = Shape::new();
     let mut budget = MAX_SEGMENTS;
 
-    draw_grid(s, &mut shape, viewport, &mut budget);
+    draw_grid(s, &mut shape, viewport);
     let offsets = s.drag_offsets();
 
     for projected in &s.projection.objects {
+        // An eraser drag hides what it has touched before the batch delete commits.
+        if s.pending_erase(projected.top_id) {
+            continue;
+        }
         let offset = offsets
             .get(&projected.top_id)
             .copied()
@@ -91,6 +121,9 @@ pub fn scene(s: &DoodleApp, pal: &Palette) -> Shape {
                 );
             }
             ObjectKind::Statement(statement) => {
+                if statement.kind != StatementKind::Sticky {
+                    continue;
+                }
                 let pose = Pose::new(
                     projected.object.pose.x + offset.0,
                     projected.object.pose.y + offset.1,
@@ -105,6 +138,19 @@ pub fn scene(s: &DoodleApp, pal: &Palette) -> Shape {
                 shape = shape
                     .fill(corners.clone(), s_color(statement.style.rgba))
                     .stroke_with(corners, true, 1.0, LineCap::Round, pal.border);
+            }
+            ObjectKind::Shape(shape_object) => {
+                draw_shape(
+                    s,
+                    &mut shape,
+                    shape_object,
+                    Pose::new(
+                        projected.object.pose.x + offset.0,
+                        projected.object.pose.y + offset.1,
+                    ),
+                    s_color(shape_object.style.rgba),
+                    &mut budget,
+                );
             }
             ObjectKind::Group => {}
         }
@@ -121,72 +167,93 @@ pub fn scene(s: &DoodleApp, pal: &Palette) -> Shape {
         );
     }
 
+    // The shape a drag is drawing lives here, not in the document, until the release.
+    if let Some((object, pose)) = s.shape_preview() {
+        draw_shape(
+            s,
+            &mut shape,
+            &object,
+            pose,
+            s_color(object.style.rgba),
+            &mut budget,
+        );
+    }
+
     draw_selection(s, &mut shape, pal, width, height);
     draw_marquee(s, &mut shape, pal);
+    draw_eraser_feedback(s, &mut shape, pal);
     draw_pending_import(s, &mut shape, width, height);
     shape
 }
 
-fn draw_grid(s: &DoodleApp, shape: &mut Shape, viewport: Rect, budget: &mut usize) {
+fn draw_grid(s: &DoodleApp, shape: &mut Shape, viewport: Rect) {
     let settings = s.grid.sanitized();
     if settings.kind == doodle_render::GridKind::None {
         return;
     }
+    let zoom = s.zoom();
+    if zoom <= GRID_HIDE_BELOW {
+        return;
+    }
     let grid = grid_frame(&s.camera, viewport, settings);
-    let alpha = settings.opacity.clamp(0.0, 1.0);
+    let fade =
+        ((zoom - GRID_HIDE_BELOW) / (GRID_FADE_END - GRID_HIDE_BELOW)).clamp(0.0, 1.0) as f32;
+    let alpha = settings.opacity.clamp(0.0, 1.0) * fade;
+    if alpha <= 0.0 {
+        return;
+    }
     let color = s_color(settings.line_rgba).alpha(alpha);
     let width = settings.line_width.max(0.1);
     let (w, h) = (viewport.width() as f32, viewport.height() as f32);
+
+    // One path of independent line subpaths and one `stroke_path` call, so the cost is linear
+    // in the number of lines instead of a full `Shape` copy per line.
+    let mut lines = Path::new();
+    let mut has_lines = false;
     for line in &grid.vertical_lines {
-        if *budget == 0 {
-            return;
-        }
-        *budget -= 1;
-        *shape = shape
-            .clone()
-            .line([*line, 0.0], [*line, h], width, LineCap::Butt, color);
+        lines = lines.move_to([*line, 0.0]).line_to([*line, h]);
+        has_lines = true;
     }
     for line in &grid.horizontal_lines {
-        if *budget == 0 {
-            return;
-        }
-        *budget -= 1;
-        *shape = shape
-            .clone()
-            .line([0.0, *line], [w, *line], width, LineCap::Butt, color);
+        lines = lines.move_to([0.0, *line]).line_to([w, *line]);
+        has_lines = true;
     }
-    for dot in &grid.dots {
-        if *budget == 0 {
-            return;
-        }
-        *budget -= 1;
-        let mut points = Vec::with_capacity(10);
-        circle(&mut points, [dot[0], dot[1]], settings.mark_size, 10);
-        *shape = shape.clone().fill(points, color);
+    if has_lines {
+        *shape = std::mem::take(shape).stroke_path(&lines, width, LineCap::Butt, color);
     }
-    for plus in &grid.pluses {
-        if *budget < 2 {
-            return;
+
+    if !grid.dots.is_empty() {
+        let mut path = Path::new();
+        for dot in grid.dots.iter().take(GRID_MARK_CAP) {
+            for index in 0..10 {
+                let angle = std::f32::consts::TAU * index as f32 / 10.0;
+                let at = [
+                    dot[0] + angle.cos() * settings.mark_size,
+                    dot[1] + angle.sin() * settings.mark_size,
+                ];
+                path = if index == 0 {
+                    path.move_to(at)
+                } else {
+                    path.line_to(at)
+                };
+            }
+            path = path.close();
         }
-        *budget -= 2;
+        *shape = std::mem::take(shape).fill_path(&path, color);
+    }
+
+    if !grid.pluses.is_empty() {
         let arm = settings.mark_size * 2.0;
-        let center = [plus[0], plus[1]];
-        *shape = shape
-            .clone()
-            .line(
-                [center[0] - arm, center[1]],
-                [center[0] + arm, center[1]],
-                width,
-                LineCap::Round,
-                color,
-            )
-            .line(
-                [center[0], center[1] - arm],
-                [center[0], center[1] + arm],
-                width,
-                LineCap::Round,
-                color,
-            );
+        let mut path = Path::new();
+        for plus in grid.pluses.iter().take(GRID_MARK_CAP) {
+            let center = [plus[0], plus[1]];
+            path = path
+                .move_to([center[0] - arm, center[1]])
+                .line_to([center[0] + arm, center[1]])
+                .move_to([center[0], center[1] - arm])
+                .line_to([center[0], center[1] + arm]);
+        }
+        *shape = std::mem::take(shape).stroke_path(&path, width, LineCap::Round, color);
     }
 }
 
@@ -216,11 +283,25 @@ fn draw_stroke(
             return;
         }
         *budget -= 1;
-        let mut circle_points = Vec::with_capacity(14);
-        circle(&mut circle_points, points[0].0, points[0].1 * 0.5, 14);
-        *shape = shape.clone().fill(circle_points, color);
+        let mut path = Path::new();
+        for index in 0..14 {
+            let angle = std::f32::consts::TAU * index as f32 / 14.0;
+            let at = [
+                points[0].0[0] + angle.cos() * points[0].1 * 0.5,
+                points[0].0[1] + angle.sin() * points[0].1 * 0.5,
+            ];
+            path = if index == 0 {
+                path.move_to(at)
+            } else {
+                path.line_to(at)
+            };
+        }
+        *shape = std::mem::take(shape).fill_path(&path.close(), color);
         return;
     }
+    // Quantize the per-segment width into half-point buckets; each bucket becomes one path
+    // stroked once at the end. Cost is linear in the samples plus a small fixed bucket count.
+    let mut buckets: BTreeMap<u32, Path> = BTreeMap::new();
     for pair in points.windows(2) {
         if *budget == 0 {
             return;
@@ -234,8 +315,143 @@ fn draw_stroke(
             continue;
         }
         *budget -= 1;
-        *shape = shape.clone().line(a, b, width_here, LineCap::Round, color);
+        let key = ((width_here * 2.0).round() as u32).max(1);
+        let path = buckets.remove(&key).unwrap_or_default();
+        buckets.insert(key, path.move_to(a).line_to(b));
     }
+    for (key, path) in buckets {
+        let width_here = key as f32 * 0.5;
+        *shape = std::mem::take(shape).stroke_path(&path, width_here, LineCap::Round, color);
+    }
+}
+
+fn draw_shape(
+    s: &DoodleApp,
+    shape: &mut Shape,
+    object: &ShapeObject,
+    pose: Pose,
+    color: Color,
+    budget: &mut usize,
+) {
+    let zoom = s.zoom();
+    let viewport = s.viewport();
+    let (width, height) = (viewport.width() as f32, viewport.height() as f32);
+    let Some(bounds) = shape_bounds(object, pose) else {
+        return;
+    };
+    let min = to_screen(s, bounds.min_x, bounds.min_y);
+    let max = to_screen(s, bounds.max_x, bounds.max_y);
+    if max[0] < -64.0 || min[0] > width + 64.0 || max[1] < -64.0 || min[1] > height + 64.0 {
+        return;
+    }
+    let line_width = (object.style.base_width * zoom as f32).max(0.5);
+    let square = Pen {
+        color,
+        width: line_width,
+        cap: LineCap::Butt,
+    };
+    let round = Pen {
+        color,
+        width: line_width,
+        cap: LineCap::Round,
+    };
+    match object.shape {
+        ShapeKind::Rectangle => {
+            draw_polyline(
+                s,
+                shape,
+                &rectangle_points(object, pose),
+                true,
+                square,
+                budget,
+            );
+        }
+        ShapeKind::Diamond => {
+            draw_polyline(
+                s,
+                shape,
+                &diamond_points(object, pose),
+                true,
+                square,
+                budget,
+            );
+        }
+        ShapeKind::Ellipse => {
+            let segments = ellipse_segments(object, zoom);
+            let points = ellipse_points(object, pose, segments);
+            draw_polyline(s, shape, &points, true, round, budget);
+        }
+        ShapeKind::Arrow => {
+            let (start, end) = line_endpoints(object, pose);
+            draw_polyline(s, shape, &[start, end], false, round, budget);
+            for (a, b) in arrow_head_segments(object, pose) {
+                draw_polyline(s, shape, &[a, b], false, round, budget);
+            }
+        }
+        ShapeKind::Line => {
+            let (start, end) = line_endpoints(object, pose);
+            draw_polyline(s, shape, &[start, end], false, round, budget);
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Pen {
+    color: Color,
+    width: f32,
+    cap: LineCap,
+}
+
+fn draw_polyline(
+    s: &DoodleApp,
+    shape: &mut Shape,
+    points: &[Point],
+    closed: bool,
+    pen: Pen,
+    budget: &mut usize,
+) {
+    if points.len() < 2 {
+        return;
+    }
+    let viewport = s.viewport();
+    let (width, height) = (viewport.width() as f32, viewport.height() as f32);
+    let screen: Vec<[f32; 2]> = points
+        .iter()
+        .map(|point| to_screen(s, point.x, point.y))
+        .collect();
+    let segments = if closed {
+        screen.len()
+    } else {
+        screen.len() - 1
+    };
+    let mut path = Path::new();
+    let mut has_segments = false;
+    for index in 0..segments {
+        if *budget == 0 {
+            return;
+        }
+        let a = screen[index];
+        let b = screen[(index + 1) % screen.len()];
+        if !visible(a, width, height, pen.width + 64.0)
+            && !visible(b, width, height, pen.width + 64.0)
+        {
+            continue;
+        }
+        *budget -= 1;
+        path = path.move_to(a).line_to(b);
+        has_segments = true;
+    }
+    if has_segments {
+        *shape = std::mem::take(shape).stroke_path(&path, pen.width, pen.cap, pen.color);
+    }
+}
+
+fn ellipse_segments(object: &ShapeObject, zoom: f64) -> usize {
+    let rx = object.width * 0.5 * zoom;
+    let ry = object.height * 0.5 * zoom;
+    let perimeter =
+        std::f64::consts::PI * (3.0 * (rx + ry) - ((3.0 * rx + ry) * (rx + 3.0 * ry)).sqrt());
+    ((perimeter / 8.0).ceil() as usize).clamp(16, 256)
 }
 
 fn rect_screen(s: &DoodleApp, rect: Rect) -> [f32; 2] {
@@ -247,6 +463,9 @@ fn rect_screen(s: &DoodleApp, rect: Rect) -> [f32; 2] {
 fn draw_selection(s: &DoodleApp, shape: &mut Shape, pal: &Palette, width: f32, height: f32) {
     let offsets = s.drag_offsets();
     for id in &s.selection {
+        if s.pending_erase(*id) {
+            continue;
+        }
         let Some(object) = s.projection.get(*id) else {
             continue;
         };
@@ -268,9 +487,8 @@ fn draw_selection(s: &DoodleApp, shape: &mut Shape, pal: &Palette, width: f32, h
             [max[0] + expand, max[1] + expand],
             [min[0] - expand, max[1] + expand],
         ];
-        *shape = shape
-            .clone()
-            .stroke_with(outline, true, 1.6, LineCap::Round, pal.selection);
+        *shape =
+            std::mem::take(shape).stroke_with(outline, true, 1.6, LineCap::Round, pal.selection);
         for corner in [
             [min[0] - expand, min[1] - expand],
             [max[0] + expand, min[1] - expand],
@@ -283,7 +501,7 @@ fn draw_selection(s: &DoodleApp, shape: &mut Shape, pal: &Palette, width: f32, h
                 [corner[0] + 2.5, corner[1] + 2.5],
                 [corner[0] - 2.5, corner[1] + 2.5],
             ];
-            *shape = shape.clone().fill(square, pal.selection);
+            *shape = std::mem::take(shape).fill(square, pal.selection);
         }
     }
 }
@@ -302,10 +520,44 @@ fn draw_marquee(s: &DoodleApp, shape: &mut Shape, pal: &Palette) {
         [max_x, max_y],
         [min_x, max_y],
     ];
-    *shape = shape
-        .clone()
+    *shape = std::mem::take(shape)
         .fill(corners.clone(), pal.selection.alpha(0.10))
         .stroke_with(corners, true, 1.0, LineCap::Round, pal.selection);
+}
+
+/// The eraser's own pointer feedback: a translucent disc at the hit-test radius and a short
+/// tail opposite the smoothed direction of travel. Drawn on the canvas, not as chrome, so it
+/// stays while the tool is active (including zen mode) and follows idle movement.
+fn draw_eraser_feedback(s: &DoodleApp, shape: &mut Shape, pal: &Palette) {
+    if s.tool != crate::app::Tool::Eraser || !s.pointer_on_canvas || s.panning {
+        return;
+    }
+    let Some(pointer) = s.pointer_screen else {
+        return;
+    };
+    // The hit test uses a world radius of `ERASER_RADIUS / zoom`, which is this many screen
+    // points at any zoom: the visible erase disc.
+    let radius = crate::app::ERASER_RADIUS as f32;
+    let ink = pal.text;
+    if let Some(direction) = s.eraser_trail_dir {
+        let end = [
+            pointer[0] - direction[0] * 48.0,
+            pointer[1] - direction[1] * 48.0,
+        ];
+        *shape = std::mem::take(shape).stroke_with(
+            vec![pointer, end],
+            false,
+            radius * 2.0,
+            LineCap::Round,
+            ink.alpha(0.14),
+        );
+    }
+    let mut disc = Vec::with_capacity(24);
+    circle(&mut disc, pointer, radius, 24);
+    let fill_alpha = if s.erasing.is_some() { 0.38 } else { 0.25 };
+    *shape = std::mem::take(shape)
+        .fill(disc.clone(), ink.alpha(fill_alpha))
+        .stroke_with(disc, true, 1.5, LineCap::Round, ink.alpha(0.5));
 }
 
 fn draw_pending_import(s: &DoodleApp, shape: &mut Shape, width: f32, height: f32) {
@@ -331,7 +583,7 @@ fn draw_pending_import(s: &DoodleApp, shape: &mut Shape, width: f32, height: f32
                 if !visible(min, width, height, 64.0) && !visible(max, width, height, 64.0) {
                     continue;
                 }
-                *shape = shape.clone().fill(
+                *shape = std::mem::take(shape).fill(
                     vec![
                         [min[0], min[1]],
                         [max[0], min[1]],
@@ -341,13 +593,16 @@ fn draw_pending_import(s: &DoodleApp, shape: &mut Shape, width: f32, height: f32
                     color,
                 );
             }
+            ObjectKind::Shape(shape_object) => {
+                draw_shape(s, shape, shape_object, pose, color, &mut budget);
+            }
             ObjectKind::Group => {}
         }
     }
     let rect = crate::placement::placement_rect(&pending.payload, translation);
     let min = to_screen(s, rect.min_x, rect.min_y);
     let size = rect_screen(s, rect);
-    *shape = shape.clone().stroke_with(
+    *shape = std::mem::take(shape).stroke_with(
         vec![
             [min[0] - 4.0, min[1] - 4.0],
             [min[0] + size[0] + 4.0, min[1] - 4.0],
@@ -363,15 +618,23 @@ fn draw_pending_import(s: &DoodleApp, shape: &mut Shape, width: f32, height: f32
 
 /// The interactive board surface.
 pub fn canvas_layer(s: &DoodleApp, pal: &Palette) -> El {
-    let cursor = match s.tool {
-        crate::app::Tool::Draw => Cursor::Crosshair,
-        crate::app::Tool::Select => Cursor::Default,
-        crate::app::Tool::Hand => {
-            if s.panning {
-                Cursor::Grabbing
-            } else {
-                Cursor::Grab
-            }
+    // A middle-button pan overrides every tool while it is held, like the hand tool's drag.
+    let cursor = if s.panning {
+        Cursor::Grabbing
+    } else {
+        match s.tool {
+            crate::app::Tool::Select => Cursor::Default,
+            crate::app::Tool::Hand => Cursor::Grab,
+            crate::app::Tool::Rectangle
+            | crate::app::Tool::Diamond
+            | crate::app::Tool::Ellipse
+            | crate::app::Tool::Arrow
+            | crate::app::Tool::Line => Cursor::Crosshair,
+            crate::app::Tool::Draw => Cursor::Image(PEN_CURSOR),
+            crate::app::Tool::Text => Cursor::Text,
+            crate::app::Tool::Sticky => Cursor::Image(STICKY_CURSOR),
+            // The canvas paints the eraser disc and tail itself, so the OS pointer is hidden.
+            crate::app::Tool::Eraser => Cursor::Hidden,
         }
     };
     let _ = pal;
@@ -382,15 +645,141 @@ pub fn canvas_layer(s: &DoodleApp, pal: &Palette) -> El {
         .h_full()
         .fill(s_color(s.grid.background_rgba))
         .cursor(cursor)
+        // The middle button pans like the hand tool whatever tool is active; the canvas's
+        // `on_drag` hears it and `Tx::button` says which button drove the gesture.
+        .pointer_buttons([PointerButton::Middle])
         .on_drawn_layout(|s: &mut DoodleApp, rect: [f32; 4]| {
             s.canvas_layout = rect;
         })
-        .on_drag(|s: &mut DoodleApp, drag, _| s.canvas_drag(drag))
+        .on_hover_change(|s: &mut DoodleApp, inside, _| {
+            s.pointer_on_canvas = inside;
+            if !inside {
+                s.eraser_trail_dir = None;
+            }
+        })
+        .on_drag(|s: &mut DoodleApp, drag, tx| s.canvas_drag(drag, tx.button(), tx))
         .on_pointer_move_local(|s: &mut DoodleApp, event, _| {
             s.pointer_moved(event.x, event.y);
         })
         .on_wheel(|s: &mut DoodleApp, event, _| s.wheel(&event))
         .on_magnify(|s: &mut DoodleApp, event, _| s.magnify(&event))
+}
+
+/// The minimap thumbnail: every object as a thin outline or its fill, plus the viewport rect.
+/// Coordinates are the minimap panel's local points, from [`DoodleApp::minimap_map`].
+pub fn minimap_scene(s: &DoodleApp, pal: &Palette) -> Shape {
+    // The panel is a thumbnail, so a bounded sample of the board is all it draws. Both caps
+    // keep a frame's work linear in the cap however many objects the board holds.
+    const OBJECT_CAP: usize = 400;
+    const POINT_CAP: usize = 24_000;
+    const POINTS_PER_STROKE: usize = 120;
+
+    let map = s.minimap_map();
+    let to = |point: Point| map.to_local(point);
+    let mut shape = Shape::new();
+    let mut points_left = POINT_CAP;
+    for projected in s.projection.objects.iter().take(OBJECT_CAP) {
+        if s.pending_erase(projected.top_id) {
+            continue;
+        }
+        let pose = projected.object.pose;
+        match &projected.object.kind {
+            ObjectKind::Stroke(stroke) => {
+                if points_left == 0 {
+                    break;
+                }
+                let color = s_color(stroke.style.rgba);
+                let stride = (stroke.geometry.points.len() / POINTS_PER_STROKE).max(1);
+                let mut path = Path::new();
+                let mut first = true;
+                for point in stroke.geometry.points.iter().step_by(stride) {
+                    if points_left == 0 {
+                        break;
+                    }
+                    points_left -= 1;
+                    let at = to(Point::new(point.x + pose.x, point.y + pose.y));
+                    path = if first {
+                        first = false;
+                        path.move_to(at)
+                    } else {
+                        path.line_to(at)
+                    };
+                }
+                if !first {
+                    shape = shape.stroke_path(&path, 1.0, LineCap::Round, color);
+                }
+            }
+            ObjectKind::Statement(statement) => {
+                let min = to(Point::new(pose.x, pose.y));
+                let max = to(Point::new(
+                    pose.x + statement.width,
+                    pose.y + statement.height,
+                ));
+                let color = if statement.kind == StatementKind::Sticky {
+                    s_color(statement.style.rgba)
+                } else {
+                    pal.muted
+                };
+                let path = Path::new()
+                    .move_to([min[0], min[1]])
+                    .line_to([max[0], min[1]])
+                    .line_to([max[0], max[1]])
+                    .line_to([min[0], max[1]])
+                    .close();
+                shape = shape.fill_path(&path, color);
+            }
+            ObjectKind::Shape(object) => {
+                let (points, closed): (Vec<[f32; 2]>, bool) = match object.shape {
+                    ShapeKind::Rectangle => (
+                        rectangle_points(object, pose)
+                            .iter()
+                            .map(|point| to(*point))
+                            .collect(),
+                        true,
+                    ),
+                    ShapeKind::Diamond => (
+                        diamond_points(object, pose)
+                            .iter()
+                            .map(|point| to(*point))
+                            .collect(),
+                        true,
+                    ),
+                    ShapeKind::Ellipse => (
+                        ellipse_points(object, pose, 24)
+                            .iter()
+                            .map(|point| to(*point))
+                            .collect(),
+                        true,
+                    ),
+                    ShapeKind::Arrow | ShapeKind::Line => {
+                        let (start, end) = line_endpoints(object, pose);
+                        (vec![to(start), to(end)], false)
+                    }
+                };
+                if points.len() < 2 {
+                    continue;
+                }
+                let mut path = Path::new().move_to(points[0]);
+                for point in &points[1..] {
+                    path = path.line_to(*point);
+                }
+                if closed {
+                    path = path.close();
+                }
+                shape = shape.stroke_path(&path, 1.0, LineCap::Round, s_color(object.style.rgba));
+            }
+            ObjectKind::Group => {}
+        }
+    }
+    let visible = s.camera.visible_world(s.viewport());
+    let min = to(Point::new(visible.min_x, visible.min_y));
+    let max = to(Point::new(visible.max_x, visible.max_y));
+    let path = Path::new()
+        .move_to([min[0], min[1]])
+        .line_to([max[0], min[1]])
+        .line_to([max[0], max[1]])
+        .line_to([min[0], max[1]]);
+    shape.stroke_path(&path, 1.0, LineCap::Round, pal.selection)
 }
 
 /// Text of every statement, positioned above the canvas.
@@ -399,6 +788,9 @@ pub fn statement_texts(s: &DoodleApp, pal: &Palette) -> Vec<El> {
     let zoom = s.zoom();
     let mut texts = Vec::new();
     for projected in &s.projection.objects {
+        if s.pending_erase(projected.top_id) {
+            continue;
+        }
         let ObjectKind::Statement(statement) = &projected.object.kind else {
             continue;
         };
@@ -411,15 +803,21 @@ pub fn statement_texts(s: &DoodleApp, pal: &Palette) -> Vec<El> {
         if width < 4.0 || height < 4.0 {
             continue;
         }
+        let sticky = statement.kind == StatementKind::Sticky;
+        let (pad_x, pad_y, radius) = if sticky {
+            (12.0, 10.0, (10.0 * zoom) as f32)
+        } else {
+            (0.0, 0.0, 0.0)
+        };
         texts.push(
             rune::text(statement.text.clone())
                 .key(format!("statement-text-{}", projected.object.id))
                 .font(rune::TextStyle::new(font, 500.0))
                 .color(pal.statement_ink)
-                .absolute(screen.x as f32 + 12.0, screen.y as f32 + 10.0)
-                .w(width - 24.0)
-                .max_h(height - 20.0)
-                .clip_rounded((10.0 * zoom) as f32)
+                .absolute(screen.x as f32 + pad_x, screen.y as f32 + pad_y)
+                .w(width - pad_x * 2.0)
+                .max_h(height - pad_y * 2.0)
+                .clip_rounded(radius)
                 .wrap()
                 .hit(),
         );
