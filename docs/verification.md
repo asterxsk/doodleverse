@@ -1,6 +1,6 @@
 # Verification
 
-Last full gate: 2026-11-16, workspace with the Rune front end. A check is listed as passed only if
+Last full gate: 2026-11-19, workspace with the Rune front end. A check is listed as passed only if
 it ran in this workspace.
 
 ## Automated gate
@@ -9,12 +9,12 @@ it ran in this workspace.
 | --- | --- |
 | `cargo fmt --all -- --check` | Pass |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Pass |
-| `cargo test --workspace --locked` | 69 passed, 0 failed |
+| `cargo test --workspace --locked` | 99 passed, 0 failed |
 | `cargo build --workspace --release --locked` | Pass |
 
-Test distribution: `doodle-types` 6, `doodle-canvas` 15, `doodle-document` 16, `doodle-files` 11,
-`doodle-ai` 11, `doodle-render` 5, `doodle-platform` 1, `doodle-app` 4, `doodle-app-rune` 0 (the Rune
-shell is verified through its headless script mode).
+Test distribution: `doodle-types` 10, `doodle-canvas` 24, `doodle-document` 20, `doodle-files` 16,
+`doodle-ai` 11, `doodle-render` 5, `doodle-platform` 1, `doodle-app` 4, `doodle-app-rune` 8 (the Rune
+shell is also verified through its headless script mode).
 
 What the tests cover:
 
@@ -26,7 +26,7 @@ What the tests cover:
   leaves the target untouched.
 - Document: every command, local undo/redo, remote-origin updates excluded from history, group
   depth and cycle handling, projection ordering and derived bounds.
-- Canvas: camera clamping and anchoring, brush pressure envelopes, stroke validity, hit clearance.
+- Canvas: camera clamping and anchoring, speed-driven brush pressure, stroke validity, hit clearance.
 - Render: grid LOD frames, sanitized settings, cache invalidation.
 - AI: request validation, streaming completion, cancellation, UTF-8 chunk-boundary regression,
   alternative cap, pin payload.
@@ -115,7 +115,7 @@ separate implementer fixed the confirmed findings and a new tester re-ran the ap
 | Area | Result |
 | --- | --- |
 | Top bar: menu island top left, centred horizontal toolbar, three-dot overflow top right | Verified at both sizes; no overlap; Ask Dibby and Export move into the overflow below 1160pt |
-| Tokens: indigo accent, radius-8 islands, 36×36 tool boxes, 22×22 swatches, `#121212` dark canvas | Verified in light and dark screenshots |
+| Tokens at the time: indigo accent, radius-8 islands, 36×36 tool boxes, 22×22 swatches, `#121212` dark canvas (superseded by the coss pass below) | Verified in light and dark screenshots |
 | Menu and overflow popovers mount and unmount instantly; scrim and Escape dismiss | Verified; no ghost rows one frame after dismissal |
 | Settings panel scroll with sticky header and close; help panel sticky header and Escape | Verified at 880×600 |
 | Canvas wheel zooms over the empty-board hint; wheel over panels and AI cards scrolls them, not the board | Verified: cursor-anchored zoom, settings/help scroll and card-answer scroll all leave the zoom badge unchanged |
@@ -203,3 +203,27 @@ cargo run -p doodle-app-rune               # Rune shell
 ```
 
 Close the app before rebuilding; the running executable locks the release binary on Windows.
+
+## coss ui tool panel, shape fill and speed-driven pressure (2026-11-19)
+
+Implemented against `docs/plans/coss-tool-panel-pressure-blueprint.md`. This section records
+what ran in the workspace; visual review of the panel variants and slow-vs-fast ink is the
+orchestrator's screenshot pass.
+
+| Area | Result |
+| --- | --- |
+| Tokens: coss neutral light/dark palettes, radius 10 surfaces and 8 controls, translucent borders, neutral primary instead of indigo | Defined in `doodle-app-rune/src/theme.rs`; both palettes compile and every constructor uses the shared radius constants |
+| Top bar: tool selection only; lock is the leading control; brush pill removed | Verified by code inspection and workspace build; the toolbar keeps the menu, overflow and bottom cluster |
+| Left tool-settings panel: stroke, closed-shape background/fill, width presets, pen pressure switch, opacity; hidden for Hand/Select/Eraser/zen | Panel visibility and contents are state-driven in `app.rs`/`view.rs`; wheel routing and board/card insets use the measured panel rect |
+| Shape fill: solid, hachure and cross-hatch for rectangle, diamond and ellipse; stroke on top; alpha 0 skips fill | `canvas.rs` fills before stroking; preview and committed objects share the path; arrow/line ignore fill |
+| Hatch clipping: polygon edge intersections for rect/diamond, analytic line/ellipse roots for ellipse; spacing tracks zoom and width; 240-line cap | Unit tests cover both intersection helpers and the outside-line cases |
+| Pressure: speed EMA only, slow thick and fast thin; simulation can be switched off; hardware pen still wins | `slow_strokes_are_thicker_than_fast_strokes`, `pressure_off_keeps_a_constant_width`, `pressure_off_still_honours_hardware_pressure`, `non_finite_settings_are_sanitized` pass |
+| Codec: new fill fields round-trip; legacy payloads ending after `style` or after `flip_y` decode with transparent hachure | `round_trip_preserves_shape_fill`, `snapshot_written_before_shape_fill_still_decodes`, and the existing direction/statement legacy tests pass |
+| Neutral board: light `#ffffff`/`#d4d4d4` grid, dark `#161616`/`#525252`, Slate/Ink presets neutral | `toggle_theme` and `BOARD_PRESETS` inspected; light and dark screenshots show a neutral board under the neutral chrome |
+| Statement colour: Text uses the stroke ink, Sticky uses one of six note tints with luminance-derived text ink, opacity applies to both | Inline editor and committed statement share the same colour path; light screenshots show coral text and a sage note |
+| Swatch ring: light ring on dark ink, dark ring on pale ink, 2pt when selected | `theme::swatch` luma threshold; visible in both themes |
+| Pressure tuning: `speed_ema * 0.7 / min_distance`, 300 px/s normalisation, `1.2 - 0.8 * n` clamped `0.4..=1.2`, default sensitivity 0.8 | Repeated real-window drags at 200 ms and 2400 ms show a clear thick/slow vs thin/fast difference in light and dark, and equal widths with Pressure Off |
+| Gate | `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`, and `cargo build --workspace --release --locked` run in this workspace |
+
+Not claimed here: the subjective feel of the hatch patterns and pressure curve. Those are checked
+by the orchestrator's screenshot and critic pass.

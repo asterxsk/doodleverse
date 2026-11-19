@@ -8,16 +8,20 @@ pub struct BrushSettings {
     pub smoothing: f32,
     pub taper_start: f32,
     pub taper_end: f32,
+    /// Whether mouse samples simulate pressure from speed. Hardware pen pressure is always
+    /// honoured when present; this only switches the fallback for devices without one.
+    pub simulate_pressure: bool,
 }
 
 impl Default for BrushSettings {
     fn default() -> Self {
         Self {
             base_width: 4.0,
-            pressure_sensitivity: 0.65,
+            pressure_sensitivity: 0.8,
             smoothing: 0.35,
             taper_start: 0.08,
             taper_end: 0.0,
+            simulate_pressure: true,
         }
     }
 }
@@ -34,7 +38,7 @@ impl BrushSettings {
             pressure_sensitivity: if self.pressure_sensitivity.is_finite() {
                 self.pressure_sensitivity.clamp(0.0, 1.0)
             } else {
-                0.65
+                0.8
             },
             smoothing: if self.smoothing.is_finite() {
                 self.smoothing.clamp(0.0, 1.0)
@@ -51,6 +55,7 @@ impl BrushSettings {
             } else {
                 0.0
             },
+            simulate_pressure: self.simulate_pressure,
         }
     }
 
@@ -99,7 +104,6 @@ pub struct StrokeBuilder {
     smoothed: doodle_types::Point,
     last_raw: doodle_types::Point,
     last_time: f64,
-    start_time: f64,
     speed_ema: f64,
     width_ema: f32,
     last_pressure: f32,
@@ -115,7 +119,11 @@ impl StrokeBuilder {
         let normalized_pressure = start
             .pressure
             .map(|p| p.clamp(0.0, 1.0) * 0.9 + 0.1)
-            .unwrap_or(0.85);
+            .unwrap_or(if settings.simulate_pressure {
+                0.85
+            } else {
+                1.0
+            });
         let factor = (1.0 - settings.pressure_sensitivity)
             + settings.pressure_sensitivity * normalized_pressure;
         let width = (settings.base_width * factor).clamp(settings.base_width * 0.3, 400.0);
@@ -126,7 +134,6 @@ impl StrokeBuilder {
             smoothed: start.pos,
             last_raw: start.pos,
             last_time: start.time_s,
-            start_time: start.time_s,
             speed_ema: 0.0,
             width_ema: width,
             last_pressure: normalized_pressure,
@@ -161,7 +168,9 @@ impl StrokeBuilder {
         if self.speed_ema <= f64::EPSILON {
             self.speed_ema = instant_speed;
         } else {
-            self.speed_ema = self.speed_ema * 0.72 + instant_speed * 0.28;
+            // Responsive enough that a change of pace shows within a few samples: slow strokes
+            // thicken, fast ones thin, and neither waits for an elapsed-time envelope.
+            self.speed_ema = self.speed_ema * 0.65 + instant_speed * 0.35;
         }
 
         let position_alpha = 1.0 - f64::from(self.settings.smoothing) * 0.6;
@@ -201,12 +210,18 @@ impl StrokeBuilder {
             // A pen stroke keeps its last known pressure response when a sample lacks it.
             return f64::from(self.last_pressure).clamp(0.1, 1.0);
         }
-        let speed_norm =
-            (self.speed_ema / (f64::from(self.settings.base_width) * 9.0)).clamp(0.0, 3.0);
-        let speed_factor = 1.0 / (1.0 + 0.55 * speed_norm);
-        let elapsed = (sample.time_s - self.start_time).clamp(0.0, 1.6);
-        let envelope = 0.78 + 0.34 * (elapsed / 1.6);
-        (speed_factor * envelope).clamp(0.22, 1.25)
+        if !self.settings.simulate_pressure {
+            // Pressure off is a constant-width brush. Hardware pressure, when present, was
+            // handled above and still wins.
+            return 1.0;
+        }
+        // Directional mouse simulation: slow strokes are thick, fast strokes are thin. There is
+        // no elapsed-time term, so a stroke never grows just because it took longer. Speed is
+        // converted to screen points per second so the response feels the same at every zoom:
+        // the builder's `min_distance` is derived from the zoom (`0.7 / zoom`).
+        let screen_speed = self.speed_ema * 0.7 / self.min_distance;
+        let speed_norm = (screen_speed / 300.0).clamp(0.0, 1.0);
+        (1.2 - 0.8 * speed_norm).clamp(0.4, 1.2)
     }
 
     #[must_use]
@@ -376,13 +391,84 @@ mod tests {
     }
 
     #[test]
-    fn default_mouse_trace_ends_heavier() {
-        let points: Vec<(f64, f64)> = (0..40).map(|i| (i as f64 * 6.0, 0.0)).collect();
-        let builder = trace(&points, 0.016);
+    fn slow_strokes_are_thicker_than_fast_strokes() {
+        // Same distance travelled, different pace. Slow: 1 world point every 50 ms (20/s).
+        // Fast: 20 world points every 16 ms (1250/s).
+        let slow_points: Vec<(f64, f64)> = (0..40).map(|i| (i as f64, 0.0)).collect();
+        let fast_points: Vec<(f64, f64)> = (0..40).map(|i| (i as f64 * 20.0, 0.0)).collect();
+        let slow = trace(&slow_points, 0.05);
+        let fast = trace(&fast_points, 0.016);
+        let (_, slow_geometry) = slow.finish();
+        let (_, fast_geometry) = fast.finish();
+        let mean = |geometry: &StrokeGeometry| {
+            geometry.points.iter().map(|point| point.width).sum::<f32>()
+                / geometry.points.len() as f32
+        };
+        let slow_mean = mean(&slow_geometry);
+        let fast_mean = mean(&fast_geometry);
+        assert!(
+            slow_mean > fast_mean * 1.2,
+            "slow mean {slow_mean} should clearly exceed fast mean {fast_mean}"
+        );
+    }
+
+    #[test]
+    fn pressure_off_keeps_a_constant_width() {
+        let settings = BrushSettings {
+            simulate_pressure: false,
+            smoothing: 0.0,
+            taper_start: 0.0,
+            taper_end: 0.0,
+            ..BrushSettings::default()
+        };
+        for spacing in [1.0, 20.0] {
+            let mut builder = StrokeBuilder::new(
+                settings,
+                RawSample::new(Point::new(0.0, 0.0), None, 0.0),
+                0.5,
+            );
+            for index in 1..40 {
+                builder.push(RawSample::new(
+                    Point::new(index as f64 * spacing, 0.0),
+                    None,
+                    index as f64 * 0.016,
+                ));
+            }
+            let (_, geometry) = builder.finish();
+            let min = geometry
+                .points
+                .iter()
+                .map(|point| point.width)
+                .fold(f32::INFINITY, f32::min);
+            let max = geometry
+                .points
+                .iter()
+                .map(|point| point.width)
+                .fold(0.0, f32::max);
+            assert!(
+                (max - min) < 0.05,
+                "pressure off should not vary width: {min}..{max} at spacing {spacing}"
+            );
+            assert!((min - settings.base_width).abs() < 0.05);
+        }
+    }
+
+    #[test]
+    fn pressure_off_still_honours_hardware_pressure() {
+        let settings = BrushSettings {
+            simulate_pressure: false,
+            taper_start: 0.0,
+            ..BrushSettings::default()
+        };
+        let mut builder = StrokeBuilder::new(
+            settings,
+            RawSample::new(Point::new(0.0, 0.0), Some(0.0), 0.0),
+            0.1,
+        );
+        builder.push(RawSample::new(Point::new(5.0, 0.0), Some(1.0), 0.016));
+        assert!(builder.saw_hardware_pressure());
         let (_, geometry) = builder.finish();
-        let first = geometry.points[0].width;
-        let last = geometry.points.last().expect("last").width;
-        assert!(last > first, "last {last} should exceed first {first}");
+        assert!(geometry.points[1].width > geometry.points[0].width);
     }
 
     #[test]
@@ -452,6 +538,7 @@ mod tests {
             smoothing: f32::INFINITY,
             taper_start: f32::NAN,
             base_width: f32::NAN,
+            simulate_pressure: false,
             ..BrushSettings::default()
         }
         .sanitized();
@@ -459,6 +546,7 @@ mod tests {
         assert!(sanitized.pressure_sensitivity.is_finite());
         assert!(sanitized.smoothing.is_finite());
         assert!(sanitized.taper_start.is_finite());
+        assert!(!sanitized.simulate_pressure);
         let sample = RawSample::new(Point::new(f64::NAN, 0.0), Some(f32::NAN), f64::NAN);
         assert!(sample.pos.is_finite());
         assert_eq!(sample.pressure, None);

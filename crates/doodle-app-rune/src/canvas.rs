@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use doodle_render::grid_frame;
 use doodle_types::{
-    ObjectKind, Point, Pose, Rect, ShapeKind, ShapeObject, StatementKind, StrokeGeometry,
+    FillStyle, ObjectKind, Point, Pose, Rect, ShapeKind, ShapeObject, StatementKind, StrokeGeometry,
 };
 use rune::{Color, Cursor, CursorImage, El, LineCap, Path, PointerButton, Shape, canvas};
 
@@ -15,6 +15,10 @@ use doodle_canvas::{
 };
 
 const MAX_SEGMENTS: usize = 200_000;
+
+/// Hard cap on hatch strokes per shape. Spacing widens to stay under it, so a huge shape at high
+/// zoom keeps full coverage instead of drawing a partial pattern.
+const MAX_HATCH_LINES: usize = 240;
 
 /// Screen-point cap on grid marks drawn per frame. `grid_frame` also keeps marks at least 16
 /// screen points apart, so this only guards against a sudden viewport or settings change.
@@ -149,6 +153,7 @@ pub fn scene(s: &DoodleApp, pal: &Palette) -> Shape {
                         projected.object.pose.y + offset.1,
                     ),
                     s_color(shape_object.style.rgba),
+                    true,
                     &mut budget,
                 );
             }
@@ -175,6 +180,7 @@ pub fn scene(s: &DoodleApp, pal: &Palette) -> Shape {
             &object,
             pose,
             s_color(object.style.rgba),
+            true,
             &mut budget,
         );
     }
@@ -331,6 +337,7 @@ fn draw_shape(
     object: &ShapeObject,
     pose: Pose,
     color: Color,
+    with_fill: bool,
     budget: &mut usize,
 ) {
     let zoom = s.zoom();
@@ -343,6 +350,9 @@ fn draw_shape(
     let max = to_screen(s, bounds.max_x, bounds.max_y);
     if max[0] < -64.0 || min[0] > width + 64.0 || max[1] < -64.0 || min[1] > height + 64.0 {
         return;
+    }
+    if with_fill {
+        draw_shape_fill(s, shape, object, pose, budget);
     }
     let line_width = (object.style.base_width * zoom as f32).max(0.5);
     let square = Pen {
@@ -393,6 +403,276 @@ fn draw_shape(
             draw_polyline(s, shape, &[start, end], false, round, budget);
         }
     }
+}
+
+/// Paints a closed shape's interior before its stroke: a solid polygon, or diagonal hatch lines
+/// clipped analytically to the shape. Arrow and line ignore fill, as does any transparent fill.
+fn draw_shape_fill(
+    s: &DoodleApp,
+    shape: &mut Shape,
+    object: &ShapeObject,
+    pose: Pose,
+    budget: &mut usize,
+) {
+    if object.shape.is_open() || object.fill_rgba[3] == 0 {
+        return;
+    }
+    let zoom = s.zoom();
+    let color = s_color(object.fill_rgba);
+    let line_width = (object.style.base_width * zoom as f32).max(0.5);
+    let spacing = (line_width * 3.0).max(6.0);
+    let hatch_width = (line_width * 0.5).clamp(1.0, 3.0);
+    match object.shape {
+        ShapeKind::Rectangle => {
+            let polygon = screen_points(s, &rectangle_points(object, pose));
+            match object.fill_style {
+                FillStyle::Solid => fill_polygon(shape, &polygon, color),
+                FillStyle::Hachure => {
+                    hatch_polygon(shape, &polygon, color, spacing, hatch_width, false, budget)
+                }
+                FillStyle::CrossHatch => {
+                    hatch_polygon(shape, &polygon, color, spacing, hatch_width, true, budget)
+                }
+            }
+        }
+        ShapeKind::Diamond => {
+            let polygon = screen_points(s, &diamond_points(object, pose));
+            match object.fill_style {
+                FillStyle::Solid => fill_polygon(shape, &polygon, color),
+                FillStyle::Hachure => {
+                    hatch_polygon(shape, &polygon, color, spacing, hatch_width, false, budget)
+                }
+                FillStyle::CrossHatch => {
+                    hatch_polygon(shape, &polygon, color, spacing, hatch_width, true, budget)
+                }
+            }
+        }
+        ShapeKind::Ellipse => {
+            let segments = ellipse_segments(object, zoom);
+            let polygon = screen_points(s, &ellipse_points(object, pose, segments));
+            let min = to_screen(s, pose.x, pose.y);
+            let max = to_screen(s, pose.x + object.width, pose.y + object.height);
+            let ellipse = [
+                (min[0] + max[0]) * 0.5,
+                (min[1] + max[1]) * 0.5,
+                (max[0] - min[0]).abs() * 0.5,
+                (max[1] - min[1]).abs() * 0.5,
+            ];
+            match object.fill_style {
+                FillStyle::Solid => fill_polygon(shape, &polygon, color),
+                FillStyle::Hachure => {
+                    hatch_ellipse(shape, ellipse, color, spacing, hatch_width, false, budget)
+                }
+                FillStyle::CrossHatch => {
+                    hatch_ellipse(shape, ellipse, color, spacing, hatch_width, true, budget)
+                }
+            }
+        }
+        ShapeKind::Arrow | ShapeKind::Line => {}
+    }
+}
+
+fn screen_points(s: &DoodleApp, points: &[Point]) -> Vec<[f32; 2]> {
+    points
+        .iter()
+        .map(|point| to_screen(s, point.x, point.y))
+        .collect()
+}
+
+fn fill_polygon(shape: &mut Shape, points: &[[f32; 2]], color: Color) {
+    if points.len() < 3 {
+        return;
+    }
+    let mut path = Path::new().move_to(points[0]);
+    for point in &points[1..] {
+        path = path.line_to(*point);
+    }
+    *shape = std::mem::take(shape).fill_path(&path.close(), color);
+}
+
+/// The diagonal families used by hachure (one) and cross-hatch (both).
+fn hatch_directions(cross: bool) -> &'static [[f32; 2]] {
+    const DIAGONAL: f32 = std::f32::consts::FRAC_1_SQRT_2;
+    if cross {
+        &[[DIAGONAL, DIAGONAL], [DIAGONAL, -DIAGONAL]]
+    } else {
+        &[[DIAGONAL, DIAGONAL]]
+    }
+}
+
+fn cross(a: [f32; 2], b: [f32; 2]) -> f32 {
+    a[0] * b[1] - a[1] * b[0]
+}
+
+/// Hatch a convex polygon (rectangle or diamond). Each diagonal is clipped by intersecting it
+/// with every edge; the extreme intersections bound the visible segment.
+fn hatch_polygon(
+    shape: &mut Shape,
+    polygon: &[[f32; 2]],
+    color: Color,
+    spacing: f32,
+    hatch_width: f32,
+    cross_hatch: bool,
+    budget: &mut usize,
+) {
+    if polygon.len() < 3 {
+        return;
+    }
+    let center = polygon_center(polygon);
+    let directions = hatch_directions(cross_hatch);
+    let per_family_cap = MAX_HATCH_LINES / directions.len();
+    let mut path = Path::new();
+    let mut has_lines = false;
+    for direction in directions {
+        let normal = [-direction[1], direction[0]];
+        let radius = polygon
+            .iter()
+            .map(|point| {
+                (normal[0] * (point[0] - center[0]) + normal[1] * (point[1] - center[1])).abs()
+            })
+            .fold(0.0, f32::max);
+        let step = spacing.max((2.0 * radius) / per_family_cap as f32).max(1.0);
+        let count = ((2.0 * radius) / step).floor() as usize + 1;
+        for index in 0..count.min(per_family_cap + 1) {
+            if *budget == 0 {
+                break;
+            }
+            let offset = -radius + index as f32 * step;
+            if offset > radius + 1e-3 {
+                break;
+            }
+            let origin = [
+                center[0] + normal[0] * offset,
+                center[1] + normal[1] * offset,
+            ];
+            if let Some((start, end)) = polygon_span(polygon, origin, *direction)
+                && (end - start).abs() >= 0.25
+            {
+                let a = [
+                    origin[0] + direction[0] * start,
+                    origin[1] + direction[1] * start,
+                ];
+                let b = [
+                    origin[0] + direction[0] * end,
+                    origin[1] + direction[1] * end,
+                ];
+                path = path.move_to(a).line_to(b);
+                has_lines = true;
+                *budget -= 1;
+            }
+        }
+    }
+    if has_lines {
+        *shape = std::mem::take(shape).stroke_path(&path, hatch_width, LineCap::Butt, color);
+    }
+}
+
+/// Analytic line/ellipse intersections: `(center_x, center_y, radius_x, radius_y)` in screen
+/// space. Offsets run across the ellipse's support in the line normal's direction.
+fn hatch_ellipse(
+    shape: &mut Shape,
+    ellipse: [f32; 4],
+    color: Color,
+    spacing: f32,
+    hatch_width: f32,
+    cross_hatch: bool,
+    budget: &mut usize,
+) {
+    let [cx, cy, rx, ry] = ellipse;
+    if rx <= 0.0 || ry <= 0.0 {
+        return;
+    }
+    let center = [cx, cy];
+    let directions = hatch_directions(cross_hatch);
+    let per_family_cap = MAX_HATCH_LINES / directions.len();
+    let mut path = Path::new();
+    let mut has_lines = false;
+    for direction in directions {
+        let normal = [-direction[1], direction[0]];
+        let radius = ((normal[0] * rx).powi(2) + (normal[1] * ry).powi(2)).sqrt();
+        let step = spacing.max((2.0 * radius) / per_family_cap as f32).max(1.0);
+        let count = ((2.0 * radius) / step).floor() as usize + 1;
+        for index in 0..count.min(per_family_cap + 1) {
+            if *budget == 0 {
+                break;
+            }
+            let offset = -radius + index as f32 * step;
+            if offset > radius + 1e-3 {
+                break;
+            }
+            let origin = [
+                center[0] + normal[0] * offset,
+                center[1] + normal[1] * offset,
+            ];
+            if let Some((start, end)) = ellipse_span(ellipse, origin, *direction)
+                && (end - start).abs() >= 0.25
+            {
+                let a = [
+                    origin[0] + direction[0] * start,
+                    origin[1] + direction[1] * start,
+                ];
+                let b = [
+                    origin[0] + direction[0] * end,
+                    origin[1] + direction[1] * end,
+                ];
+                path = path.move_to(a).line_to(b);
+                has_lines = true;
+                *budget -= 1;
+            }
+        }
+    }
+    if has_lines {
+        *shape = std::mem::take(shape).stroke_path(&path, hatch_width, LineCap::Butt, color);
+    }
+}
+
+fn polygon_center(polygon: &[[f32; 2]]) -> [f32; 2] {
+    let mut x = 0.0;
+    let mut y = 0.0;
+    for point in polygon {
+        x += point[0];
+        y += point[1];
+    }
+    [x / polygon.len() as f32, y / polygon.len() as f32]
+}
+
+/// The parameter range of a line (origin + t * direction) inside a convex polygon.
+fn polygon_span(polygon: &[[f32; 2]], origin: [f32; 2], direction: [f32; 2]) -> Option<(f32, f32)> {
+    let mut min = f32::INFINITY;
+    let mut max = f32::NEG_INFINITY;
+    for index in 0..polygon.len() {
+        let a = polygon[index];
+        let b = polygon[(index + 1) % polygon.len()];
+        let edge = [b[0] - a[0], b[1] - a[1]];
+        let denominator = cross(direction, edge);
+        if denominator.abs() < 1e-6 {
+            continue;
+        }
+        let to_a = [a[0] - origin[0], a[1] - origin[1]];
+        let t = cross(to_a, edge) / denominator;
+        let s = cross(to_a, direction) / denominator;
+        if (-1e-4..=1.0 + 1e-4).contains(&s) {
+            min = min.min(t);
+            max = max.max(t);
+        }
+    }
+    (min <= max).then_some((min, max))
+}
+
+/// The parameter range of a line (origin + t * direction) inside an axis-aligned ellipse.
+fn ellipse_span(ellipse: [f32; 4], origin: [f32; 2], direction: [f32; 2]) -> Option<(f32, f32)> {
+    let [cx, cy, rx, ry] = ellipse;
+    let ox = origin[0] - cx;
+    let oy = origin[1] - cy;
+    let a = direction[0] * direction[0] / (rx * rx) + direction[1] * direction[1] / (ry * ry);
+    let b = 2.0 * (ox * direction[0] / (rx * rx) + oy * direction[1] / (ry * ry));
+    let c = ox * ox / (rx * rx) + oy * oy / (ry * ry) - 1.0;
+    let discriminant = b * b - 4.0 * a * c;
+    if discriminant < 0.0 || a <= f32::EPSILON {
+        return None;
+    }
+    let root = discriminant.sqrt();
+    Some(((-b - root) / (2.0 * a), (-b + root) / (2.0 * a)))
 }
 
 #[derive(Clone, Copy)]
@@ -594,7 +874,7 @@ fn draw_pending_import(s: &DoodleApp, shape: &mut Shape, width: f32, height: f32
                 );
             }
             ObjectKind::Shape(shape_object) => {
-                draw_shape(s, shape, shape_object, pose, color, &mut budget);
+                draw_shape(s, shape, shape_object, pose, color, false, &mut budget);
             }
             ObjectKind::Group => {}
         }
@@ -804,6 +1084,22 @@ pub fn statement_texts(s: &DoodleApp, pal: &Palette) -> Vec<El> {
             continue;
         }
         let sticky = statement.kind == StatementKind::Sticky;
+        // A sticky note's ink follows its background luminance; a text statement is drawn in
+        // the ink it was created with. Boards written before text carried its own colour stored
+        // the sticky default on text too, so that exact value keeps the board ink for legibility.
+        let ink = if sticky {
+            let [r, g, b, _] = statement.style.rgba;
+            let luma = 0.2126 * f32::from(r) + 0.7152 * f32::from(g) + 0.0722 * f32::from(b);
+            if luma < 120.0 {
+                s_color([250, 250, 250, 255])
+            } else {
+                pal.statement_ink
+            }
+        } else if statement.style.rgba == [255, 241, 186, 255] {
+            pal.statement_ink
+        } else {
+            s_color(statement.style.rgba)
+        };
         let (pad_x, pad_y, radius) = if sticky {
             (12.0, 10.0, (10.0 * zoom) as f32)
         } else {
@@ -813,7 +1109,7 @@ pub fn statement_texts(s: &DoodleApp, pal: &Palette) -> Vec<El> {
             rune::text(statement.text.clone())
                 .key(format!("statement-text-{}", projected.object.id))
                 .font(rune::TextStyle::new(font, 500.0))
-                .color(pal.statement_ink)
+                .color(ink)
                 .absolute(screen.x as f32 + pad_x, screen.y as f32 + pad_y)
                 .w(width - pad_x * 2.0)
                 .max_h(height - pad_y * 2.0)
@@ -823,4 +1119,36 @@ pub fn statement_texts(s: &DoodleApp, pal: &Palette) -> Vec<El> {
         );
     }
     texts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn polygon_span_clips_a_diagonal_to_the_square() {
+        let square = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
+        let diagonal = [
+            std::f32::consts::FRAC_1_SQRT_2,
+            std::f32::consts::FRAC_1_SQRT_2,
+        ];
+        let (start, end) = polygon_span(&square, [5.0, 5.0], diagonal).expect("diagonal span");
+        assert!((start + 7.071_068).abs() < 0.01, "start {start}");
+        assert!((end - 7.071_068).abs() < 0.01, "end {end}");
+    }
+
+    #[test]
+    fn polygon_span_rejects_a_line_outside_the_shape() {
+        let square = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
+        assert!(polygon_span(&square, [5.0, 50.0], [1.0, 0.0]).is_none());
+    }
+
+    #[test]
+    fn ellipse_span_solves_the_two_roots() {
+        let circle = [0.0, 0.0, 10.0, 10.0];
+        let (start, end) = ellipse_span(circle, [0.0, 0.0], [1.0, 0.0]).expect("roots");
+        assert!((start + 10.0).abs() < 1e-3);
+        assert!((end - 10.0).abs() < 1e-3);
+        assert!(ellipse_span(circle, [0.0, 20.0], [1.0, 0.0]).is_none());
+    }
 }

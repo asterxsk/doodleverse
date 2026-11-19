@@ -5,9 +5,10 @@ portable boards, and a small offline AI sketch partner named Dibby — no accoun
 cloud, no autosave.
 
 The interface now runs on [Rune](https://github.com/anomalyco/rune), anomalyco's Rust UI
-library. The chrome follows Excalidraw's arrangement — a centred horizontal toolbar, a board
-menu top left, and a three-dot menu top right — while board theming stays Miro-style. The
-original eframe/egui shell stays in the workspace as a second front end over the same core.
+library. The chrome uses coss ui's neutral tokens — a tool-only centred toolbar, a board
+menu top left, a three-dot menu top right, and a floating left panel for the next drawing's
+style. Board theming stays Miro-style. The original eframe/egui shell stays in the workspace
+as a second front end over the same core.
 
 ![Doodleverse on Rune](docs/images/rune-window.png)
 
@@ -16,12 +17,15 @@ original eframe/egui shell stays in the workspace as a second front end over the
 - **Infinite canvas** with cursor-anchored wheel zoom (plain wheel, `Ctrl`/`Cmd`+wheel, or
   pinch), `Shift`+wheel horizontal panning, and hand- or middle-drag panning, over a bounded
   level-of-detail grid (dots, pluses, lines, or none).
-- **Pressure-aware brush.** Mouse strokes simulate pressure from speed and progress. On
-  Windows, tablet pen pressure is read from the native pointer stack and applied per sample.
-- **Excalidraw toolset.** Rectangle, diamond, ellipse, arrow and line shapes (Shift constrains),
-  text blocks and sticky notes with an inline editor, and a whole-object eraser where one drag
-  is one undo step. Tools are `Q` lock, `H` hand, `V` select, `R` rectangle, `D` diamond,
-  `O` ellipse, `A` arrow, `L` line, `P` pen (`B` also works), `T` text, `N` sticky, `E` eraser.
+- **Pressure-aware brush.** Mouse strokes simulate pressure from speed: slow strokes are thick,
+  fast ones are thin. On Windows, tablet pen pressure is read from the native pointer stack and
+  applied per sample; the pen panel can switch simulation off without disabling a real pen.
+- **Excalidraw toolset with coss styling.** Rectangle, diamond, ellipse, arrow and line shapes
+  (Shift constrains), text blocks and sticky notes with an inline editor, and a whole-object
+  eraser where one drag is one undo step. Closed shapes take a stroke colour, a muted background,
+  hachure/cross-hatch/solid fill, a stroke-width preset and opacity from the left panel. Tools are
+  `Q` lock, `H` hand, `V` select, `R` rectangle, `D` diamond, `O` ellipse, `A` arrow, `L` line,
+  `P` pen (`B` also works), `T` text, `N` sticky, `E` eraser.
   The pointer matches the tool (crosshair for shapes, pen and note cursors, I-beam for text,
   grab for hand and middle-drag); the eraser paints its hit disc plus a short translucent tail.
   Freehand point samples are curved at low zoom, and the grid and stroke paths are batched so
@@ -30,9 +34,11 @@ original eframe/egui shell stays in the workspace as a second front end over the
   select all, and command-level undo/redo that never records remote CRDT edits.
 - **Board theming** with presets and custom colors, grid spacing/opacity/color, dot/plus
   size and line width.
-- **Excalidraw-style chrome.** A centred icon toolbar with key badges and a lock that pins it,
-  a board menu top left, a three-dot menu top right, and a bottom-left cluster holding zoom,
-  canvas settings, the minimap and undo/redo. Icons are [Lucide](https://lucide.dev) (ISC).
+- **coss ui chrome.** A tool-only centred icon toolbar with key badges and a lock that pins it,
+  a board menu top left, a three-dot menu top right, a floating left panel for the active
+  drawing tool, and a bottom-left cluster holding zoom, canvas settings, the minimap and
+  undo/redo. Light and dark are real token sets, not inversions; surfaces use radius 10 and
+  controls radius 8. Icons are [Lucide](https://lucide.dev) (ISC).
 - **Portable files.** `.doodleverse` export uses a versioned envelope with CRC validation.
   Import validates the whole payload, remaps every identity, and places the board at the
   origin (empty canvas) or as a validated ghost preview (non-empty canvas).

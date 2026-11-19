@@ -191,9 +191,10 @@ pub fn card_layout(s: &DoodleApp, card: &CardUi) -> CardLayout {
     let viewport_height = viewport.height() as f32;
     let screen = s.camera.world_to_screen(card.card.world_pos, viewport);
     let chrome = chrome_height(card);
+    let x_min = s.board_left_inset();
     let x = (screen.x as f32).clamp(
-        CARD_MARGIN,
-        (viewport_width - CARD_WIDTH - CARD_MARGIN).max(CARD_MARGIN),
+        x_min,
+        (viewport_width - CARD_WIDTH - CARD_MARGIN).max(x_min),
     );
     let y_min = CHROME_TOP_INSET;
     let y_max = (viewport_height - CHROME_BOTTOM_INSET - chrome - MIN_ANSWER_HEIGHT).max(y_min);
@@ -230,7 +231,7 @@ pub fn card_views(s: &DoodleApp, pal: &Palette) -> Vec<El> {
             .w(CARD_WIDTH)
             .padding(12.0)
             .gap(8.0)
-            .radius(12.0)
+            .radius(10.0)
             .fill(pal.card)
             .border(1.0, pal.border)
             .shadow(10.0, 28.0, pal.shadow);

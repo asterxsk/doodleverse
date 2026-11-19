@@ -7,8 +7,9 @@ use doodle_canvas::{BrushSettings, Camera, RawSample, StrokeBuilder};
 use doodle_document::{BoardDocument, BoardProjection};
 use doodle_render::{GridKind, GridSettings};
 use doodle_types::{
-    MAX_IMPORT_BYTES, MIN_SHAPE_SIZE, ObjectId, ObjectKind, Point, Pose, Rect, ShapeKind,
-    ShapeObject, StatementKind, StatementObject, StatementStyle, StrokeGeometry, StrokeStyle,
+    FillStyle, MAX_IMPORT_BYTES, MIN_SHAPE_SIZE, ObjectId, ObjectKind, Point, Pose, Rect,
+    ShapeKind, ShapeObject, StatementKind, StatementObject, StatementStyle, StrokeGeometry,
+    StrokeStyle,
 };
 use rune::{
     AppHandle, Drag, FileDialogOptions, Key, KeyEvent, MagnifyEvent, Mods, Phase, PointerButton,
@@ -32,10 +33,14 @@ const POPOVER_PRESS_SUPPRESSION: f64 = 0.05;
 const POPOVER_TRIGGER_WINDOW: f64 = 0.12;
 
 /// Window-point insets that board content must stay clear of: the menu bar and toolbar along the
-/// top, plus the brush pill below the toolbar, the bottom-left cluster along the bottom, each plus
-/// a 12 pt margin.
-pub const CHROME_TOP_INSET: f32 = 106.0;
+/// top and the bottom-left cluster along the bottom, each plus a 12 pt margin. The left edge is
+/// dynamic: it moves right past the tool-settings panel when that panel is visible.
+pub const CHROME_TOP_INSET: f32 = 68.0;
 pub const CHROME_BOTTOM_INSET: f32 = 61.0;
+/// The tool-settings panel's fixed slot: 12 pt from the left, below the 44 pt top bar plus a gap.
+pub const TOOL_PANEL_X: f32 = 12.0;
+pub const TOOL_PANEL_Y: f32 = 64.0;
+pub const TOOL_PANEL_WIDTH: f32 = 208.0;
 
 /// Bottom-left controls. The minimap sits 12 pt above the cluster and is 200×140.
 pub const MINIMAP_WIDTH: f32 = 200.0;
@@ -192,8 +197,7 @@ pub struct PendingImport {
 /// Every continuous value the settings panel edits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
-    BrushSize,
-    Pressure,
+    Opacity,
     Smoothing,
     TaperStart,
     TaperEnd,
@@ -218,6 +222,16 @@ pub struct DoodleApp {
     pub tool: Tool,
     pub brush: BrushSettings,
     pub color: [u8; 4],
+    /// Stroke and fill opacity for the next drawing, 0..=1. Existing objects keep their own
+    /// alpha, as with every other style control in this pass.
+    pub opacity: f32,
+    pub fill_rgba: [u8; 4],
+    pub fill_style: FillStyle,
+    /// Background colour for the next sticky note, and opacity for text ink.
+    pub note_rgba: [u8; 4],
+    /// Whether mouse samples simulate speed-driven pressure. Hardware pen pressure is always
+    /// honoured; this is the panel's pressure switch.
+    pub pressure_enabled: bool,
     pub grid: GridSettings,
     pub light_theme: bool,
     pub reduced_motion: bool,
@@ -251,6 +265,9 @@ pub struct DoodleApp {
     pub suppress_board_press_until: Option<f64>,
     pub pin_preview: Option<PinPreview>,
     pub canvas_layout: [f32; 4],
+    /// The tool-settings panel's measured window rect, for wheel routing. Zero height before its
+    /// first layout pass.
+    pub tool_panel_layout: [f32; 4],
     pub window_size: [f32; 2],
     pub last_pointer_world: Point,
     /// The pointer in canvas-local screen points, for the eraser feedback that the canvas
@@ -291,6 +308,11 @@ impl DoodleApp {
             tool: Tool::Draw,
             brush: BrushSettings::default(),
             color: [32, 30, 35, 255],
+            opacity: 1.0,
+            fill_rgba: [0, 0, 0, 0],
+            fill_style: FillStyle::default(),
+            note_rgba: [255, 241, 186, 255],
+            pressure_enabled: true,
             grid: GridSettings::default(),
             light_theme: true,
             reduced_motion: false,
@@ -320,6 +342,7 @@ impl DoodleApp {
             suppress_board_press_until: None,
             pin_preview: None,
             canvas_layout: [0.0, 0.0, window_size[0], window_size[1]],
+            tool_panel_layout: [TOOL_PANEL_X, TOOL_PANEL_Y, TOOL_PANEL_WIDTH, 0.0],
             window_size,
             last_pointer_world: Point::default(),
             pointer_screen: None,
@@ -348,6 +371,77 @@ impl DoodleApp {
 
     pub fn zoom(&self) -> f64 {
         self.camera.zoom.max(doodle_types::MIN_ZOOM)
+    }
+
+    /// The left tool-settings panel is shown for every drawing tool and hidden for the
+    /// navigation tools and zen mode.
+    pub fn tool_panel_visible(&self) -> bool {
+        !self.zen
+            && matches!(
+                self.tool,
+                Tool::Draw
+                    | Tool::Rectangle
+                    | Tool::Diamond
+                    | Tool::Ellipse
+                    | Tool::Arrow
+                    | Tool::Line
+                    | Tool::Text
+                    | Tool::Sticky
+            )
+    }
+
+    /// Whether the active tool draws a closed shape, which is the only kind that can carry a
+    /// background and a fill style.
+    pub fn tool_panel_closed_shape(&self) -> bool {
+        matches!(self.tool, Tool::Rectangle | Tool::Diamond | Tool::Ellipse)
+    }
+
+    /// Whether the active tool has a stroke width: text and sticky notes do not.
+    pub fn tool_panel_stroke_width(&self) -> bool {
+        !matches!(self.tool, Tool::Text | Tool::Sticky)
+    }
+
+    pub fn tool_panel_pen(&self) -> bool {
+        matches!(self.tool, Tool::Draw)
+    }
+
+    /// The panel's current window rect while it is visible. Zero height means it has not laid
+    /// out yet, so wheel routing should fall through.
+    pub fn tool_panel_rect(&self) -> Option<[f32; 4]> {
+        (self.tool_panel_visible() && self.tool_panel_layout[3] > 0.0)
+            .then_some(self.tool_panel_layout)
+    }
+
+    /// Window-point inset the board's content must keep clear of on the left. The panel's slot
+    /// plus a 12 pt gap when it is up, otherwise the plain window margin.
+    pub fn board_left_inset(&self) -> f32 {
+        if self.tool_panel_visible() {
+            TOOL_PANEL_X + TOOL_PANEL_WIDTH + 12.0
+        } else {
+            12.0
+        }
+    }
+
+    /// The stroke colour the next object is created with, after the opacity control.
+    pub fn stroke_rgba(&self) -> [u8; 4] {
+        with_alpha(self.color, self.opacity)
+    }
+
+    /// The fill colour the next closed shape is created with, after the opacity control.
+    pub fn fill_rgba_effective(&self) -> [u8; 4] {
+        with_alpha(self.fill_rgba, self.opacity)
+    }
+
+    /// The sticky-note background the next note is created with, after the opacity control.
+    pub fn note_rgba_effective(&self) -> [u8; 4] {
+        with_alpha(self.note_rgba, self.opacity)
+    }
+
+    fn effective_brush(&self) -> BrushSettings {
+        BrushSettings {
+            simulate_pressure: self.pressure_enabled,
+            ..self.brush
+        }
     }
 
     /// A scrim press dismisses the open popover. The press can also have reached the board in the
@@ -616,9 +710,15 @@ impl DoodleApp {
             shape: drag.kind,
             width: dx.abs().max(min_size),
             height: dy.abs().max(min_size),
-            style: self.brush.style(self.color),
+            style: self.effective_brush().style(self.stroke_rgba()),
             flip_x: open && dx < 0.0,
             flip_y: open && dy < 0.0,
+            fill_rgba: if open {
+                [0, 0, 0, 0]
+            } else {
+                self.fill_rgba_effective()
+            },
+            fill_style: self.fill_style,
         };
         Some((shape, pose))
     }
@@ -668,11 +768,19 @@ impl DoodleApp {
                 (width, f64::from(wrapped).max(TEXT_MIN_HEIGHT))
             }
         };
+        let style = match editor.kind {
+            StatementKind::Text => StatementStyle {
+                rgba: self.stroke_rgba(),
+            },
+            StatementKind::Sticky => StatementStyle {
+                rgba: self.note_rgba_effective(),
+            },
+        };
         let statement = StatementObject {
             text,
             width,
             height,
-            style: StatementStyle::default(),
+            style,
             kind: editor.kind,
         };
         let pose = Pose::new(editor.world.x, editor.world.y);
@@ -746,8 +854,7 @@ impl DoodleApp {
         let f = fraction.clamp(0.0, 1.0);
         let lerp = |min: f64, max: f64| min + (max - min) * f;
         match target {
-            Target::BrushSize => self.brush.base_width = lerp(1.0, 32.0) as f32,
-            Target::Pressure => self.brush.pressure_sensitivity = f as f32,
+            Target::Opacity => self.opacity = f as f32,
             Target::Smoothing => self.brush.smoothing = f as f32,
             Target::TaperStart => self.brush.taper_start = (f * 0.45) as f32,
             Target::TaperEnd => self.brush.taper_end = (f * 0.45) as f32,
@@ -767,8 +874,7 @@ impl DoodleApp {
     pub fn slider_fraction(&self, target: Target) -> f32 {
         let inv = |value: f64, min: f64, max: f64| ((value - min) / (max - min)) as f32;
         match target {
-            Target::BrushSize => inv(f64::from(self.brush.base_width), 1.0, 32.0),
-            Target::Pressure => self.brush.pressure_sensitivity,
+            Target::Opacity => self.opacity,
             Target::Smoothing => self.brush.smoothing,
             Target::TaperStart => self.brush.taper_start / 0.45,
             Target::TaperEnd => self.brush.taper_end / 0.45,
@@ -789,8 +895,7 @@ impl DoodleApp {
     /// The value a slider announces to assistive technology, in the unit the user sees.
     pub fn slider_value_text(&self, target: Target) -> String {
         match target {
-            Target::BrushSize => format!("{:.0} px", self.brush.base_width),
-            Target::Pressure => format!("{:.0}%", self.brush.pressure_sensitivity * 100.0),
+            Target::Opacity => format!("{:.0}%", self.opacity.clamp(0.0, 1.0) * 100.0),
             Target::Smoothing => format!("{:.0}%", self.brush.smoothing * 100.0),
             Target::TaperStart => format!("{:.0}%", self.brush.taper_start / 0.45 * 100.0),
             Target::TaperEnd => format!("{:.0}%", self.brush.taper_end / 0.45 * 100.0),
@@ -896,11 +1001,11 @@ impl DoodleApp {
     pub fn toggle_theme(&mut self) {
         self.light_theme = !self.light_theme;
         if self.light_theme {
-            self.grid.background_rgba = [250, 248, 243, 255];
-            self.grid.line_rgba = [174, 168, 158, 255];
+            self.grid.background_rgba = [255, 255, 255, 255];
+            self.grid.line_rgba = [212, 212, 212, 255];
         } else {
-            self.grid.background_rgba = [24, 23, 28, 255];
-            self.grid.line_rgba = [92, 89, 101, 255];
+            self.grid.background_rgba = [22, 22, 22, 255];
+            self.grid.line_rgba = [82, 82, 82, 255];
         }
         self.adapt_ink();
     }
@@ -1079,9 +1184,10 @@ impl DoodleApp {
         // margin cards are clamped by, so a note never lands on the window edge.
         let top = f64::from(CHROME_TOP_INSET);
         let bottom = f64::from(CHROME_BOTTOM_INSET);
-        let board_min = self
-            .camera
-            .screen_to_world(Point::new(BOARD_SCREEN_MARGIN, top), viewport);
+        let board_min = self.camera.screen_to_world(
+            Point::new(f64::from(self.board_left_inset()), top),
+            viewport,
+        );
         let board_max = self.camera.screen_to_world(
             Point::new(
                 (viewport.width() - BOARD_SCREEN_MARGIN).max(BOARD_SCREEN_MARGIN),
@@ -1447,7 +1553,13 @@ impl DoodleApp {
     pub fn settings_rect(&self) -> Option<[f32; 4]> {
         self.show_settings.then(|| {
             let height = (self.window_size[1] - 150.0).clamp(280.0, 680.0);
-            [140.0, 84.0, 320.0, height]
+            // Step past the tool-settings panel instead of painting under it.
+            let x = if self.tool_panel_visible() {
+                240.0
+            } else {
+                140.0
+            };
+            [x, 84.0, 320.0, height]
         })
     }
 
@@ -1503,7 +1615,8 @@ impl DoodleApp {
     fn wheel_over_overlay(&self, x: f32, y: f32) -> bool {
         let inside =
             |[rx, ry, rw, rh]: [f32; 4]| x >= rx && x <= rx + rw && y >= ry && y <= ry + rh;
-        self.settings_rect().is_some_and(inside)
+        self.tool_panel_rect().is_some_and(inside)
+            || self.settings_rect().is_some_and(inside)
             || self.help_rect().is_some_and(inside)
             || self.cards.iter().any(|card| {
                 let layout = crate::cards::card_layout(self, card);
@@ -1634,11 +1747,12 @@ impl DoodleApp {
                 self.pan_last = [drag.x, drag.y];
             }
             Tool::Draw => {
+                let brush = self.effective_brush();
                 let start = RawSample::new(world, doodle_platform::pen_pressure(), self.clock);
-                let builder = StrokeBuilder::new(self.brush, start, 0.7 / self.zoom());
+                let builder = StrokeBuilder::new(brush, start, 0.7 / self.zoom());
                 self.stroke = Some(StrokeGesture {
                     builder,
-                    style: self.brush.style(self.color),
+                    style: brush.style(self.stroke_rgba()),
                 });
                 self.hint_visible = false;
                 self.drag = None;
@@ -1894,6 +2008,12 @@ impl DoodleApp {
             }
         }
     }
+}
+
+/// Scale a colour's alpha by the opacity control. A transparent colour stays transparent.
+fn with_alpha(rgba: [u8; 4], opacity: f32) -> [u8; 4] {
+    let alpha = (f32::from(rgba[3]) * opacity.clamp(0.0, 1.0)).round();
+    [rgba[0], rgba[1], rgba[2], alpha.clamp(0.0, 255.0) as u8]
 }
 
 /// Area two rects share; zero when they only touch or do not meet.

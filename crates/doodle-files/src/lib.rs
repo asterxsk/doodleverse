@@ -373,6 +373,8 @@ mod tests {
                 style: StrokeStyle::default(),
                 flip_x: false,
                 flip_y: false,
+                fill_rgba: [0, 0, 0, 0],
+                fill_style: doodle_types::FillStyle::default(),
             }),
         }
     }
@@ -531,6 +533,101 @@ mod tests {
         assert_eq!((shape.width, shape.height), (120.0, 80.0));
         assert!(!shape.flip_x);
         assert!(!shape.flip_y);
+        assert_eq!(shape.fill_rgba, [0, 0, 0, 0]);
+        assert_eq!(shape.fill_style, doodle_types::FillStyle::Hachure);
+    }
+
+    #[derive(serde::Serialize)]
+    struct LegacyFlippedShape {
+        shape: doodle_types::ShapeKind,
+        width: f64,
+        height: f64,
+        style: StrokeStyle,
+        flip_x: bool,
+        flip_y: bool,
+    }
+
+    // Variant order must match `ObjectKind` so postcard's variant index is the same.
+    #[allow(dead_code)]
+    #[derive(serde::Serialize)]
+    enum LegacyFlippedKind {
+        Stroke(StrokeObject),
+        Group,
+        Statement(LegacyStatement),
+        Shape(LegacyFlippedShape),
+    }
+
+    #[derive(serde::Serialize)]
+    struct LegacyFlippedObject {
+        id: ObjectId,
+        parent: Option<ObjectId>,
+        order_key: i64,
+        pose: Pose,
+        kind: LegacyFlippedKind,
+    }
+
+    #[derive(serde::Serialize)]
+    struct LegacyFlippedSnapshot {
+        schema_version: u16,
+        objects: Vec<LegacyFlippedObject>,
+    }
+
+    #[test]
+    fn snapshot_written_before_shape_fill_still_decodes() {
+        // The direction flags existed, the fill did not: the decoder must stop cleanly after
+        // flip_y and default to transparent hachure.
+        let legacy = LegacyFlippedSnapshot {
+            schema_version: doodle_types::DOCUMENT_SCHEMA_VERSION,
+            objects: vec![LegacyFlippedObject {
+                id: ObjectId::new(),
+                parent: None,
+                order_key: 0,
+                pose: Pose::new(5.0, 10.0),
+                kind: LegacyFlippedKind::Shape(LegacyFlippedShape {
+                    shape: doodle_types::ShapeKind::Arrow,
+                    width: 120.0,
+                    height: 80.0,
+                    style: StrokeStyle::default(),
+                    flip_x: false,
+                    flip_y: true,
+                }),
+            }],
+        };
+        let bytes = wrap_legacy(&legacy, legacy.schema_version);
+        let decoded = decode_and_validate(&bytes).expect("legacy shape decodes");
+        let shape = decoded
+            .objects
+            .iter()
+            .find_map(|object| match &object.kind {
+                ObjectKind::Shape(shape) => Some(shape),
+                _ => None,
+            })
+            .expect("diamond");
+        assert!(shape.flip_y);
+        assert_eq!(shape.fill_rgba, [0, 0, 0, 0]);
+        assert_eq!(shape.fill_style, doodle_types::FillStyle::Hachure);
+    }
+
+    #[test]
+    fn round_trip_preserves_shape_fill() {
+        let mut filled = shape(doodle_types::ShapeKind::Diamond);
+        if let ObjectKind::Shape(value) = &mut filled.kind {
+            value.fill_rgba = [232, 226, 214, 200];
+            value.fill_style = doodle_types::FillStyle::CrossHatch;
+        }
+        let snapshot = BoardSnapshot::new(vec![filled]);
+        let bytes = encode(&snapshot).expect("encode");
+        let payload = decode_and_validate(&bytes).expect("decode");
+        let shape = payload
+            .objects
+            .iter()
+            .find_map(|object| match &object.kind {
+                ObjectKind::Shape(shape) => Some(shape),
+                _ => None,
+            })
+            .expect("diamond");
+        assert_eq!(shape.fill_rgba, [232, 226, 214, 200]);
+        assert_eq!(shape.fill_style, doodle_types::FillStyle::CrossHatch);
     }
 
     fn wrap_legacy<T: serde::Serialize>(snapshot: &T, schema_version: u16) -> Vec<u8> {

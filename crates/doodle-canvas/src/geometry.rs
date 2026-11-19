@@ -438,6 +438,8 @@ mod tests {
             style: doodle_types::StrokeStyle::default(),
             flip_x: false,
             flip_y: false,
+            fill_rgba: [0, 0, 0, 0],
+            fill_style: doodle_types::FillStyle::default(),
         }
     }
 

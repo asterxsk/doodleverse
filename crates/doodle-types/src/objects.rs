@@ -274,12 +274,25 @@ impl ShapeKind {
     }
 }
 
+/// How a closed shape's interior is painted. Hachure is the default so shapes written before the
+/// field existed keep the light, sketch-like fill rather than a solid block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum FillStyle {
+    #[default]
+    Hachure,
+    CrossHatch,
+    Solid,
+}
+
 /// A shape's box plus the drag direction for open paths.
 ///
 /// `pose` is always the box's minimum corner and `width`/`height` are unsigned. For an arrow or a
 /// line the pair `(flip_x, flip_y)` says which corner the drag started from, so a path dragged
 /// right-to-left starts at the box's right edge instead of its left. Closed shapes must leave both
 /// flags false; their pose already encodes every drag direction.
+///
+/// `fill_rgba` is the interior paint; alpha 0 means no fill. `fill_style` selects solid or one of
+/// the two hatch patterns. Open paths (arrow, line) ignore both.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct ShapeObject {
     pub shape: ShapeKind,
@@ -288,12 +301,14 @@ pub struct ShapeObject {
     pub style: StrokeStyle,
     pub flip_x: bool,
     pub flip_y: bool,
+    pub fill_rgba: [u8; 4],
+    pub fill_style: FillStyle,
 }
 
 /// Postcard does not describe structs, so appended fields are not optional for `#[serde(default)]`
 /// alone: the decoder hits end-of-buffer instead of returning `None`. This visitor treats
-/// end-of-buffer after the legacy four fields as unflipped, which keeps snapshots and CRDT payloads
-/// written before the direction flags existed readable.
+/// end-of-buffer after any legacy field group as that group's defaults, which keeps snapshots and
+/// CRDT payloads written before the direction flags and the fill existed readable.
 impl<'de> Deserialize<'de> for ShapeObject {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -330,13 +345,33 @@ impl<'de> Deserialize<'de> for ShapeObject {
                     Err(error) if is_end_of_input(&error) => (false, true),
                     Err(error) => return Err(error),
                 };
-                let flip_y = if legacy {
-                    false
+                let (flip_y, legacy) = if legacy {
+                    (false, true)
                 } else {
                     match seq.next_element::<bool>() {
+                        Ok(Some(value)) => (value, false),
+                        Ok(None) => (false, true),
+                        Err(error) if is_end_of_input(&error) => (false, true),
+                        Err(error) => return Err(error),
+                    }
+                };
+                let fill_rgba = if legacy {
+                    [0, 0, 0, 0]
+                } else {
+                    match seq.next_element::<[u8; 4]>() {
                         Ok(Some(value)) => value,
-                        Ok(None) => false,
-                        Err(error) if is_end_of_input(&error) => false,
+                        Ok(None) => [0, 0, 0, 0],
+                        Err(error) if is_end_of_input(&error) => [0, 0, 0, 0],
+                        Err(error) => return Err(error),
+                    }
+                };
+                let fill_style = if legacy {
+                    FillStyle::default()
+                } else {
+                    match seq.next_element::<FillStyle>() {
+                        Ok(Some(value)) => value,
+                        Ok(None) => FillStyle::default(),
+                        Err(error) if is_end_of_input(&error) => FillStyle::default(),
                         Err(error) => return Err(error),
                     }
                 };
@@ -347,6 +382,8 @@ impl<'de> Deserialize<'de> for ShapeObject {
                     style,
                     flip_x,
                     flip_y,
+                    fill_rgba,
+                    fill_style,
                 })
             }
 
@@ -360,6 +397,8 @@ impl<'de> Deserialize<'de> for ShapeObject {
                 let mut style = None;
                 let mut flip_x = None;
                 let mut flip_y = None;
+                let mut fill_rgba = None;
+                let mut fill_style = None;
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
                         "shape" => shape = Some(map.next_value()?),
@@ -368,6 +407,8 @@ impl<'de> Deserialize<'de> for ShapeObject {
                         "style" => style = Some(map.next_value()?),
                         "flip_x" => flip_x = Some(map.next_value()?),
                         "flip_y" => flip_y = Some(map.next_value()?),
+                        "fill_rgba" => fill_rgba = Some(map.next_value()?),
+                        "fill_style" => fill_style = Some(map.next_value()?),
                         _ => {
                             let _: de::IgnoredAny = map.next_value()?;
                         }
@@ -380,13 +421,24 @@ impl<'de> Deserialize<'de> for ShapeObject {
                     style: style.ok_or_else(|| de::Error::missing_field("style"))?,
                     flip_x: flip_x.unwrap_or(false),
                     flip_y: flip_y.unwrap_or(false),
+                    fill_rgba: fill_rgba.unwrap_or([0, 0, 0, 0]),
+                    fill_style: fill_style.unwrap_or_default(),
                 })
             }
         }
 
         deserializer.deserialize_struct(
             "ShapeObject",
-            &["shape", "width", "height", "style", "flip_x", "flip_y"],
+            &[
+                "shape",
+                "width",
+                "height",
+                "style",
+                "flip_x",
+                "flip_y",
+                "fill_rgba",
+                "fill_style",
+            ],
             ShapeVisitor,
         )
     }
@@ -596,6 +648,8 @@ mod tests {
             style: StrokeStyle::default(),
             flip_x: false,
             flip_y: false,
+            fill_rgba: [0, 0, 0, 0],
+            fill_style: FillStyle::default(),
         };
         assert!(shape.is_valid());
         assert_eq!(shape.local_bounds(), Some(Rect::new(0.0, 0.0, 120.0, 80.0)));
@@ -637,6 +691,8 @@ mod tests {
             style: StrokeStyle::default(),
             flip_x: false,
             flip_y: true,
+            fill_rgba: [0, 0, 0, 0],
+            fill_style: FillStyle::default(),
         };
         assert!(line.is_valid());
         assert_eq!(line.local_bounds(), Some(Rect::new(0.0, 0.0, 0.0, 120.0)));
@@ -660,6 +716,8 @@ mod tests {
             style: StrokeStyle::default(),
             flip_x: false,
             flip_y: false,
+            fill_rgba: [0, 0, 0, 0],
+            fill_style: FillStyle::default(),
         };
         assert!(!rect.is_valid());
         rect.width = 120.0;

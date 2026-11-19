@@ -1,5 +1,5 @@
 use doodle_render::GridKind;
-use doodle_types::StatementKind;
+use doodle_types::{FillStyle, StatementKind};
 use rune::{
     Color, Cx, El, Key, KeyEvent, ScrollSpec, Transition, Tx, canvas, col, edit_access, el, row,
     text, text_input,
@@ -16,6 +16,30 @@ fn ink_rgba(light: bool) -> [u8; 4] {
     } else {
         [238, 234, 227, 255]
     }
+}
+
+/// Muted coss-style background fills for closed shapes. `None` is transparent and is drawn with
+/// a small cross so it reads as "no fill" rather than a white swatch.
+fn background_swatches() -> [(&'static str, &'static str, [u8; 4]); 6] {
+    [
+        ("None", "No fill", [0, 0, 0, 0]),
+        ("Sand", "Sand", [232, 226, 214, 255]),
+        ("Sage", "Sage", [214, 228, 218, 255]),
+        ("Rose", "Rose", [232, 218, 222, 255]),
+        ("Sky", "Sky", [214, 226, 238, 255]),
+        ("Stone", "Stone", [226, 226, 226, 255]),
+    ]
+}
+
+fn note_swatches() -> [(&'static str, &'static str, [u8; 4]); 6] {
+    [
+        ("Yellow", "Yellow", [255, 241, 186, 255]),
+        ("Sand", "Sand", [240, 230, 210, 255]),
+        ("Sage", "Sage", [220, 236, 224, 255]),
+        ("Rose", "Rose", [245, 226, 230, 255]),
+        ("Sky", "Sky", [222, 234, 248, 255]),
+        ("Stone", "Stone", [232, 232, 232, 255]),
+    ]
 }
 
 fn swatches(light: bool) -> [(&'static str, &'static str, [u8; 4]); 6] {
@@ -39,8 +63,8 @@ const BOARD_PRESETS: [(&str, [u8; 4], [u8; 4], bool); 6] = [
     ("Snow", [255, 255, 255, 255], [203, 207, 214, 255], true),
     ("Sand", [244, 235, 214, 255], [174, 158, 127, 255], true),
     ("Mist", [232, 239, 244, 255], [148, 164, 176, 255], true),
-    ("Slate", [43, 45, 51, 255], [94, 99, 112, 255], false),
-    ("Ink", [24, 23, 28, 255], [205, 201, 210, 255], false),
+    ("Slate", [38, 38, 38, 255], [115, 115, 115, 255], false),
+    ("Ink", [22, 22, 22, 255], [82, 82, 82, 255], false),
 ];
 
 /// Any press on the chrome dismisses an open popover, matching what the scrim does.
@@ -93,12 +117,6 @@ pub fn view(s: &DoodleApp, _cx: &mut Cx<DoodleApp>) -> El {
         // the whole chrome.
         root = root.child(menu_island(s, &pal));
         root = root.child(toolbar_island(s, &pal));
-        // The brush pill is contextual chrome just below the toolbar, where Canvas settings and
-        // Shortcuts & about open; it steps aside while either panel is up instead of sitting
-        // under the panel's top edge.
-        if !s.show_settings && !s.show_help {
-            root = root.child(brush_pill(s, &pal));
-        }
         root = root.child(overflow_island(s, &pal));
     }
     // The bottom-left cluster is Excalidraw's zoom/undo group: it stays in zen mode.
@@ -113,6 +131,9 @@ pub fn view(s: &DoodleApp, _cx: &mut Cx<DoodleApp>) -> El {
     // Panels first, then popovers: a menu or overflow menu opened over a panel must paint above
     // it and take presses on the rows the two overlap, while the modal dialogs below still sit
     // over everything.
+    if s.tool_panel_visible() {
+        root = root.child(tool_settings_panel(s, &pal));
+    }
     if s.show_settings {
         root = root.child(settings_panel(s, &pal));
     }
@@ -193,7 +214,19 @@ fn inline_editor(s: &DoodleApp, pal: &Palette) -> Option<El> {
     } else {
         ("Text", "Text…")
     };
-    let ink = if sticky { pal.statement_ink } else { pal.text };
+    let sticky_fill = s.note_rgba;
+    let sticky_luma = 0.2126 * f32::from(sticky_fill[0])
+        + 0.7152 * f32::from(sticky_fill[1])
+        + 0.0722 * f32::from(sticky_fill[2]);
+    let ink = if sticky {
+        if sticky_luma < 120.0 {
+            theme::color([250, 250, 250, 255])
+        } else {
+            pal.statement_ink
+        }
+    } else {
+        theme::color(s.color)
+    };
     let field = text_input(&s.editor_edit, theme::body())
         .key("inline-editor-field")
         .label(label)
@@ -221,7 +254,7 @@ fn inline_editor(s: &DoodleApp, pal: &Palette) -> Option<El> {
         .radius(8.0)
         .border(1.0, pal.selection)
         .fill(if sticky {
-            theme::color([255, 241, 186, 255])
+            theme::color(sticky_fill)
         } else {
             pal.card
         })
@@ -284,7 +317,9 @@ fn menu_island(s: &DoodleApp, pal: &Palette) -> El {
         })
         .on_drag(|s: &mut DoodleApp, drag, _| s.popover_trigger_drag(drag));
     if s.menu_open {
-        menu_button = menu_button.fill(pal.selected_bg);
+        // A subtle pressed fill keeps the label readable; the primary fill is reserved for the
+        // selected tool, whose icon and key badge swap to primary-foreground ink.
+        menu_button = menu_button.fill(pal.press);
     }
     let mut content = row().gap(6.0).items_center().child(menu_button);
     // Narrow windows leave the centred toolbar room to pass between the two corner islands.
@@ -396,7 +431,7 @@ fn tool_item(s: &DoodleApp, pal: &Palette, tool: Tool, name: &str, key: &str) ->
         .help(name)
         .help_keys([key])
         .child(tool_icon(tool, ink))
-        .child(theme::key_badge(key, pal))
+        .child(theme::key_badge(key, selected, pal))
         .on_press(move |s: &mut DoodleApp| {
             dismiss_popovers(s);
             s.set_tool(tool);
@@ -413,7 +448,7 @@ fn toolbar_island(s: &DoodleApp, pal: &Palette) -> El {
             .help("Lock toolbar")
             .help_keys(["Q"])
             .child(icons::icon("lock", 16.0, lock_ink))
-            .child(theme::key_badge("Q", pal))
+            .child(theme::key_badge("Q", locked, pal))
             .on_press(|s: &mut DoodleApp| {
                 dismiss_popovers(s);
                 s.toolbar_locked = !s.toolbar_locked;
@@ -436,7 +471,6 @@ fn toolbar_island(s: &DoodleApp, pal: &Palette) -> El {
     ] {
         bar = bar.child(tool_item(s, pal, tool, name, key));
     }
-    bar = bar.child(theme::divider_v(pal));
     let card = if locked {
         // Locked means no mount or position animation at all: the bar is pinned and stays put
         // through card open/close and resize.
@@ -451,47 +485,158 @@ fn toolbar_island(s: &DoodleApp, pal: &Palette) -> El {
         .child(card.child(bar))
 }
 
-/// Brush size and colour swatches, in a compact pill just under the toolbar.
-fn brush_pill(s: &DoodleApp, pal: &Palette) -> El {
-    let mut bar = row().gap(6.0).items_center();
-    bar = bar.child(text("Size").font(theme::caption()).color(pal.muted));
-    bar = bar.child(slider(
-        pal,
-        "brush-size",
-        "Brush size",
-        60.0,
-        s.slider_fraction(Target::BrushSize),
-        Target::BrushSize,
-        s.slider_value_text(Target::BrushSize),
-    ));
-    bar = bar.child(
-        text(format!("{:.0} px", s.brush.base_width))
-            .font(theme::caption())
-            .color(pal.muted),
-    );
-    bar = bar.child(theme::divider_v(pal));
-    let mut colors = row().gap(4.0).items_center();
-    for (key, name, rgba) in swatches(s.light_theme) {
-        let selected = s.color == rgba;
-        colors = colors.child(
-            theme::swatch(format!("swatch-{key}"), rgba, selected, pal)
-                .label(name)
-                .on_press(move |s: &mut DoodleApp| {
-                    dismiss_popovers(s);
-                    s.color = rgba;
-                    s.set_tool(Tool::Draw);
-                }),
-        );
+/// The left tool-settings panel, modelled on Excalidraw's panel but in coss tokens. It is the
+/// primary surface for the next drawing's style; the top bar only selects tools.
+fn tool_settings_panel(s: &DoodleApp, pal: &Palette) -> El {
+    let closed = s.tool_panel_closed_shape();
+    let mut body = theme::panel(pal);
+
+    // Sticky notes carry a background colour, not an ink; text uses the ink swatches as its
+    // glyph colour.
+    if s.tool != Tool::Sticky {
+        let mut stroke_row = row().gap(6.0).items_center().w_full();
+        for (key, name, rgba) in swatches(s.light_theme) {
+            let selected = s.color == rgba;
+            stroke_row = stroke_row.child(
+                theme::swatch(format!("tool-swatch-{key}"), rgba, selected, pal)
+                    .label(name)
+                    .on_press(move |s: &mut DoodleApp| s.color = rgba),
+            );
+        }
+        body = body.child(panel_section(pal, "Stroke", stroke_row));
     }
-    bar = bar.child(colors);
-    el().key("brush-pill")
-        .absolute(0.0, 64.0)
-        .w_full()
-        .justify_center()
-        // Contextual chrome: it leaves and returns with the panel that displaced it, so its exit
-        // fade can never sit under a fading-in panel's top edge.
+
+    if s.tool == Tool::Sticky {
+        let mut note_row = row().gap(6.0).items_center().w_full();
+        for (key, name, rgba) in note_swatches() {
+            let selected = s.note_rgba == rgba;
+            note_row = note_row.child(
+                theme::swatch(format!("tool-note-{key}"), rgba, selected, pal)
+                    .label(name)
+                    .on_press(move |s: &mut DoodleApp| s.note_rgba = rgba),
+            );
+        }
+        body = body.child(panel_section(pal, "Background", note_row));
+    }
+
+    if closed {
+        let mut background_row = row().gap(6.0).items_center().w_full();
+        for (key, name, rgba) in background_swatches() {
+            let selected = s.fill_rgba == rgba;
+            let mut chip = theme::swatch(format!("tool-background-{key}"), rgba, selected, pal)
+                .label(name)
+                .on_press(move |s: &mut DoodleApp| s.fill_rgba = rgba);
+            if rgba[3] == 0 {
+                chip = chip
+                    .items_center()
+                    .justify_center()
+                    .child(icons::icon("x", 10.0, pal.muted));
+            }
+            background_row = background_row.child(chip);
+        }
+        body = body.child(panel_section(pal, "Background", background_row));
+
+        let mut fills = row().gap(4.0).w_full();
+        for (style, label) in [
+            (FillStyle::Hachure, "Hachure"),
+            (FillStyle::CrossHatch, "Cross"),
+            (FillStyle::Solid, "Solid"),
+        ] {
+            fills = fills.child(
+                theme::choice_button(
+                    format!("tool-fill-{label}"),
+                    label,
+                    s.fill_style == style,
+                    pal,
+                )
+                .grow(1.0)
+                .on_press(move |s: &mut DoodleApp| s.fill_style = style),
+            );
+        }
+        body = body.child(panel_section(pal, "Fill", fills));
+    }
+
+    if s.tool_panel_stroke_width() {
+        let mut widths = row().gap(4.0).w_full();
+        for (value, label) in [(2.0_f32, "Thin"), (4.0, "Bold"), (8.0, "Extra")] {
+            widths = widths.child(
+                theme::choice_button(
+                    format!("tool-width-{label}"),
+                    label,
+                    (s.brush.base_width - value).abs() < 0.5,
+                    pal,
+                )
+                .grow(1.0)
+                .on_press(move |s: &mut DoodleApp| s.brush.base_width = value),
+            );
+        }
+        body = body.child(panel_section(pal, "Stroke width", widths));
+    }
+
+    if s.tool_panel_pen() {
+        let mut pressure = row().gap(4.0).w_full();
+        for (enabled, label) in [(false, "Off"), (true, "On")] {
+            pressure = pressure.child(
+                theme::choice_button(
+                    format!("tool-pressure-{label}"),
+                    label,
+                    s.pressure_enabled == enabled,
+                    pal,
+                )
+                .grow(1.0)
+                .on_press(move |s: &mut DoodleApp| s.pressure_enabled = enabled),
+            );
+        }
+        body = body.child(panel_section(pal, "Pressure", pressure));
+    }
+
+    let mut opacity = col().gap(6.0).w_full();
+    opacity = opacity.child(
+        row()
+            .w_full()
+            .items_center()
+            .child(
+                text("Opacity")
+                    .font(theme::caption())
+                    .color(pal.muted)
+                    .grow(1.0),
+            )
+            .child(
+                text(format!("{:.0}%", s.opacity * 100.0))
+                    .font(theme::caption())
+                    .color(pal.muted),
+            ),
+    );
+    opacity = opacity.child(slider(
+        pal,
+        "opacity",
+        "Opacity",
+        184.0,
+        s.slider_fraction(Target::Opacity),
+        Target::Opacity,
+        s.slider_value_text(Target::Opacity),
+    ));
+    body = body.child(opacity);
+
+    el().key("tool-settings-panel")
+        .absolute(crate::app::TOOL_PANEL_X, crate::app::TOOL_PANEL_Y)
+        .w(crate::app::TOOL_PANEL_WIDTH)
+        // Mounting and unmounting are instant: the panel is contextual chrome and must not
+        // fade under the toolbar when the tool changes.
+        .instant_changes()
         .transition(Transition::none())
-        .child(island(pal).child(bar))
+        .on_drawn_layout(|s: &mut DoodleApp, rect: [f32; 4]| {
+            s.tool_panel_layout = rect;
+        })
+        .child(body)
+}
+
+fn panel_section(pal: &Palette, title: &str, control: El) -> El {
+    col()
+        .w_full()
+        .gap(6.0)
+        .child(theme::section(title, pal))
+        .child(control)
 }
 
 fn history_row(s: &DoodleApp, pal: &Palette) -> El {
@@ -571,7 +716,7 @@ fn bottom_cluster(s: &DoodleApp, pal: &Palette) -> El {
         .pin(Some(12.0), None, None, Some(10.0))
         .h(36.0)
         .padding(4.0)
-        .radius(8.0)
+        .radius(theme::RADIUS_SURFACE)
         .fill(pal.card)
         .border(1.0, pal.border)
         .shadow(7.0, 14.0, pal.shadow)
@@ -595,11 +740,11 @@ fn minimap_panel(s: &DoodleApp, pal: &Palette) -> El {
         .padding(0.0)
         .w(width)
         .h(height)
-        .clip_rounded(8.0)
+        .clip_rounded(theme::RADIUS_SURFACE)
         .child(
             canvas(crate::canvas::minimap_scene(s, pal))
                 .size(width, height)
-                .radius(8.0)
+                .radius(theme::RADIUS_SURFACE)
                 .label("Minimap")
                 .cursor(rune::Cursor::Pointer)
                 .on_drag(|s: &mut DoodleApp, drag, _| s.minimap_drag(drag))
@@ -926,20 +1071,6 @@ fn settings_panel(s: &DoodleApp, pal: &Palette) -> El {
     body = body.child(slider_row(
         s,
         pal,
-        "Size",
-        "brush-panel-size",
-        Target::BrushSize,
-    ));
-    body = body.child(slider_row(
-        s,
-        pal,
-        "Pressure",
-        "brush-pressure",
-        Target::Pressure,
-    ));
-    body = body.child(slider_row(
-        s,
-        pal,
         "Smoothing",
         "brush-smoothing",
         Target::Smoothing,
@@ -961,7 +1092,7 @@ fn settings_panel(s: &DoodleApp, pal: &Palette) -> El {
     body = body.child(
         text(
             "A tablet pen's real pressure is read on Windows through the pointer stack. Mouse \
-             strokes simulate pressure from speed and stroke progress.",
+             strokes simulate pressure from speed: slow strokes are thick, fast ones are thin.",
         )
         .font(theme::caption())
         .color(pal.muted)
@@ -1012,15 +1143,17 @@ fn settings_panel(s: &DoodleApp, pal: &Palette) -> El {
         .child(theme::divider_h(pal))
         .child(body);
 
+    // Step past the tool-settings panel instead of painting under it.
+    let x = if s.tool_panel_visible() { 240.0 } else { 140.0 };
     theme::island_col(pal)
         .key("settings-panel")
         // Foreground panels replace each other in the same commit; entering and leaving at once
         // keeps the closing one from fading over the one that opened.
         .transition(Transition::none())
-        .absolute(140.0, 84.0)
+        .absolute(x, 84.0)
         .w(320.0)
         .h(height)
-        .clip_rounded(8.0)
+        .clip_rounded(theme::RADIUS_SURFACE)
         .scroll(ScrollSpec {
             stick_bottom: false,
         })
@@ -1139,9 +1272,9 @@ fn help_panel(s: &DoodleApp, pal: &Palette) -> El {
         .absolute(x, y)
         .w(width)
         .h(height)
-        .radius(12.0)
+        .radius(theme::RADIUS_SURFACE)
         .padding(16.0)
-        .clip_rounded(12.0)
+        .clip_rounded(theme::RADIUS_SURFACE)
         .scroll(ScrollSpec {
             stick_bottom: false,
         })
@@ -1342,7 +1475,7 @@ fn centered(
                 .child(
                     theme::island(pal)
                         .w(width)
-                        .radius(12.0)
+                        .radius(theme::RADIUS_SURFACE)
                         .padding(16.0)
                         .child(body),
                 ),

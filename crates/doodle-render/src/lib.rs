@@ -38,8 +38,8 @@ impl Default for GridSettings {
             opacity: 0.5,
             mark_size: 1.25,
             line_width: 1.0,
-            line_rgba: [120, 120, 130, 255],
-            background_rgba: [250, 248, 243, 255],
+            line_rgba: [212, 212, 212, 255],
+            background_rgba: [255, 255, 255, 255],
         }
     }
 }

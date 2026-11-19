@@ -446,3 +446,108 @@ unsaved-board close dialog shares the verified pin-dialog code but cannot be rai
 **Still blocked:** B01–B07 unchanged (transport, real AI providers and credentials, OS vault and
 non-Windows pen pressure, packaging/signing, PR/release publication). Checkpoints continue on the
 authorized GitHub remote.
+
+## coss ui restyle, tool panel and pressure pass (2026-11-19)
+
+### D36 — coss ui neutral tokens replace the indigo Excalidraw accent
+- **Because:** the brief asks for coss ui's neutral, crisp system rather than Excalidraw's
+  indigo. The palette now uses white/`#161616` backgrounds, `#262626`/`#f5f5f5` primary,
+  translucent black-8%/white-6% borders, muted-foreground `#606060`/`#808080`, and the ring
+  tokens for selection. Surfaces share radius 10 and controls radius 8 through two constants.
+  Light and dark are separate token sets, not inversions. Swatches derive their selected ring
+  from the swatch's own luminance (light ring on dark ink, dark ring on pale ink) because the
+  neutral ring token disappears on both extremes.
+- **Alternatives:** keep indigo and restyle only radii (does not meet the brief); use pure
+  black/white borders (harsher than coss's translucent borders).
+- **Reversibility:** cheap — values live in `theme::palette` and two radius constants.
+- **Risk if wrong:** a neutral primary makes the selected tool less colourful than before; the
+  filled primary surface and primary-foreground icon/key badge carry the state instead.
+
+### D37 — Tool-only top bar, left tool-settings panel, brush pill removed
+- **Because:** the user asked for Excalidraw's layout in coss tokens: the top bar selects tools
+  and the left panel edits the next drawing. The brush pill duplicated swatches and a size
+  slider under the toolbar, so it was removed. Lock stays as the leading mode control, matching
+  the supplied reference. The panel shows for Draw, Rectangle, Diamond, Ellipse, Arrow, Line,
+  Text and Sticky; it is hidden for Hand, Select, Eraser and zen. Contents adapt: stroke always,
+  background/fill for closed shapes, width presets except text/sticky, pressure for pen, opacity
+  always; Sticky swaps the stroke row for six note tints. The duplicate Size and Pressure response
+  sliders were removed from Canvas settings, which now keeps Smoothing and taper only.
+- **Alternatives:** keep the brush pill (duplicates controls and crowds the toolbar); show the
+  panel for every tool (navigation tools have no drawing style).
+- **Reversibility:** cheap — `tool_panel_visible` and the view builder.
+- **Risk if wrong:** the panel covers more board at small window sizes; the board's left inset,
+  card clamp and pin placement now step past it, and Canvas settings shifts right while it is up.
+
+### D38 — Shape fill is appended to `ShapeObject` under schema version 1
+- **Because:** boards written before fill must keep decoding. `fill_rgba: [u8;4]` and
+  `fill_style: FillStyle` are appended after `flip_y`, and the existing end-of-buffer visitor
+  defaults them to transparent hachure. Alpha 0 means no fill, so old boards render unchanged.
+  The schema version stays 1.
+- **Alternatives:** a new schema version (breaks every existing board for an additive field);
+  a separate fill object (complicates grouping and export).
+- **Reversibility:** additive — older builds ignore the trailing bytes only if their decoder is
+  EOF-tolerant; this build is forward-compatible for the new fields.
+- **Risk if wrong:** a build that is not EOF-tolerant cannot read boards that carry fill; the
+  schema note records the same deliberate forward-compatibility policy as D31.
+
+### D39 — Hatch fills are clipped analytically and line-capped
+- **Because:** Rune has no clip region. Hachure and cross-hatch are diagonal line families in
+  screen space, clipped by polygon edge intersections (rectangle, diamond) or the analytic
+  line/ellipse quadratic (ellipse). Spacing is `max(6px, line_width * 3)` and widens to keep a
+  240-line cap per shape, so deep zoom-out and huge shapes stay linear-cost. Solid fill is one
+  filled polygon. Strokes paint after fill.
+- **Alternatives:** raster clip masks (not available in Rune's canvas); per-pixel or per-triangle
+  hatching (far more geometry); no cap (a huge shape at high zoom could emit thousands of lines).
+- **Reversibility:** cheap — `canvas.rs` owns the fill pass.
+- **Risk if wrong:** very large shapes get wider hatch spacing to respect the cap; the pattern is
+  still complete, just coarser.
+
+### D40 — Pressure is speed-driven and can be switched off
+- **Because:** the old mouse path mixed speed with an elapsed-time envelope, so later samples grew
+  regardless of pace. The envelope is gone. A responsive speed EMA (alpha 0.35) becomes screen
+  points per second via `speed_ema * 0.7 / min_distance` (the builder derives `min_distance` as
+  `0.7 / zoom`), normalized at 300 px/s, and mapped to `1.2 - 0.8 * speed_norm`, clamped
+  `0.4..=1.2`: slow is thick, fast is thin, at every zoom. The default sensitivity is 0.8.
+  `BrushSettings::simulate_pressure` (default true) returns 1.0 for mouse samples when false;
+  hardware pen pressure still wins. The left panel's Pressure Off/On switch drives this.
+- **Alternatives:** keep the envelope (wrong direction for the reported feel); make the switch
+  disable hardware pressure too (the brief says a real pen still wins).
+- **Reversibility:** cheap — one field, one mapping, one panel toggle.
+- **Risk if wrong:** the mapping is tuned for a 4pt default brush; very wide brushes need a faster
+  stroke before they thin. The formula keeps the old width clamp and taper. A first tuning pass
+  made normal strokes hairline, so the curve was recalibrated against real screen-speed drags and
+  the sensitivity raised from 0.65 to 0.8.
+
+### D41 — Opacity is baked into the next object's alpha, not a live style edit
+- **Because:** the brief scopes the panel to the next drawing and keeps selection editing out of
+  this pass. Opacity multiplies the chosen stroke and fill alpha at creation, so no new document
+  field or re-projection path is needed.
+- **Alternatives:** a per-object opacity field (schema change and style editing UI); live editing
+  of selected objects (explicitly out of scope).
+- **Reversibility:** cheap — `stroke_rgba` / `fill_rgba_effective` in `app.rs`.
+- **Risk if wrong:** changing opacity after drawing does not affect existing objects; that matches
+  the brief and the same limitation as stroke colour and width.
+
+### D42 — Board and grid presets are neutral, not indigo
+- **Because:** the coss theme is the whole surface, and the old defaults leaked Excalidraw's
+  indigo into the board background, grid and the Slate/Ink presets. Light default is now
+  `#ffffff` background with `#d4d4d4` grid lines; dark default is `#161616` with `#525252`.
+  Slate is `#262626`/`#737373` and Ink is `#161616`/`#525252`, so the board and the chrome read as
+  one neutral system in both themes.
+- **Alternatives:** keep indigo board presets (they fight the neutral chrome and the reference
+  asks for coss); remove dark presets (users still need a dark board in light theme).
+- **Reversibility:** cheap — preset tables and `toggle_theme`.
+- **Risk if wrong:** neutral boards are lower-contrast than the old indigo for some users; stroke
+  ink defaults stay black/white and the width presets preserve legibility.
+
+### D43 — Text and sticky colours are real state, not hardcoded defaults
+- **Because:** the new panel offers stroke colour for Text and background colour for Sticky, but
+  both committed with a fixed default style. Sticky now stores `note_rgba` (six neutral note
+  tints), Text stores the stroke colour; both multiply by opacity at commit. Sticky ink picks
+  light/dark text from the note's luminance so every note tint stays readable. The inline editor
+  previews the same colours, so the draft matches the committed object.
+- **Alternatives:** keep note colour fixed (the swatches would be dead controls); auto-derive
+  sticky ink from theme only (fails on saturated note tints).
+- **Reversibility:** cheap — `note_rgba`, `commit_editor` and the statement ink helper.
+- **Risk if wrong:** a very saturated future note tint could read poorly; the luminance threshold
+  is the guard and the current six tints all clear it.

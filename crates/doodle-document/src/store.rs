@@ -1594,6 +1594,8 @@ mod tests {
             style: StrokeStyle::default(),
             flip_x: false,
             flip_y: false,
+            fill_rgba: [0, 0, 0, 0],
+            fill_style: doodle_types::FillStyle::default(),
         };
         let outcome = doc
             .create_shape(Pose::new(10.0, 20.0), shape)
@@ -1622,6 +1624,8 @@ mod tests {
             style: StrokeStyle::default(),
             flip_x: false,
             flip_y: false,
+            fill_rgba: [0, 0, 0, 0],
+            fill_style: doodle_types::FillStyle::default(),
         };
         let result = doc.create_shape(Pose::default(), shape);
         assert!(matches!(
@@ -1641,6 +1645,8 @@ mod tests {
             style: StrokeStyle::default(),
             flip_x: false,
             flip_y: true,
+            fill_rgba: [0, 0, 0, 0],
+            fill_style: doodle_types::FillStyle::default(),
         };
         let outcome = doc
             .create_shape(Pose::new(40.0, 20.0), shape)
@@ -1671,6 +1677,8 @@ mod tests {
                 style: StrokeStyle::default(),
                 flip_x: false,
                 flip_y: false,
+                fill_rgba: [0, 0, 0, 0],
+                fill_style: doodle_types::FillStyle::default(),
             },
         )
         .expect("shape");

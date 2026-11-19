@@ -29,7 +29,10 @@ struct StoredObject {
 enum ObjectKind {
     Stroke(StrokeObject { style, geometry }),
     Group,
-    Statement(StatementObject { text, width, height, style }),
+    Statement(StatementObject { text, width, height, style, kind }),
+    Shape(ShapeObject {
+        shape, width, height, style, flip_x, flip_y, fill_rgba, fill_style,
+    }),
 }
 ```
 
@@ -43,6 +46,13 @@ Invariants:
   finite width in `0.05..=400.0`; a stroke has 1..=`MAX_STROKE_POINTS` points.
 - Statement text is at most `MAX_OBJECT_TEXT_BYTES` (64 KiB) of UTF-8; width is 40..=4000, height
   30..=4000.
+- `ShapeKind` is rectangle, diamond, ellipse, arrow or line. Closed shapes keep a positive box;
+  arrow and line may be zero-extent on one axis and carry `(flip_x, flip_y)` to replay the drag
+  direction. `fill_rgba` alpha 0 means transparent; `fill_style` is `Hachure` (default),
+  `CrossHatch` or `Solid`. Open paths ignore fill.
+- `ShapeObject`'s fill fields are appended after the direction flags. The deserializer stops
+  cleanly at end-of-buffer and defaults to transparent hachure, so payloads written before the
+  fill existed still decode under schema version 1.
 - Render order is `(order_key, id)`, independent of CRDT map order.
 
 ## 3. Portable file
@@ -148,7 +158,10 @@ The UI must not depend on CRDT iteration order, map keys, or internal yrs types.
   its objects and commits one `delete_objects` batch, so a single undo restores all of them.
 - Text input owns the keyboard while a text field is focused; global shortcuts must not fire then.
 - Pen pressure is `Option<f32>` in `0.0..=1.0`. `None` means "no pressure source" and selects the
-  simulated mouse envelope. A hardware source must not report a constant fake value.
+  simulated mouse response. A hardware source must not report a constant fake value.
+- Simulated pressure is speed-driven and directional: slow samples produce thick ink, fast samples
+  thin ink. There is no elapsed-time envelope. `BrushSettings::simulate_pressure = false` makes a
+  mouse stroke constant-width; hardware pen pressure is still honoured when present.
 - Windows pressure is read from `WM_POINTER`/`GetPointerPenInfo`; the subclass forwards every
   message unchanged.
 

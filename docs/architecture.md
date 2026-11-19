@@ -93,26 +93,37 @@ Two front ends sit on the same crates. `doodle-app` is the original eframe/egui 
 `doodle-app-rune` is the current UI, built with Rune at revision
 `958743308f36fdf1c568c513badc96ddb0c7f040`.
 
-Both draw one full-window canvas layer and absolutely positioned islands above it: a menu
-island (Doodleverse / Ask Dibby / Export), a centred horizontal toolbar (pen, select, hand,
-eraser with key badges, six swatches, size slider, Undo/Redo), a right-pinned action island
-(Group, Ungroup, Fit, Settings), and bottom status/zoom islands. `Alt+Z` hides every island,
-closes any open panel, and leaves one hint; the same shortcut restores them. Settings is a
-fixed-height column panel with a sticky header and close button, help is a floating panel, and
-close/pin are centered modals.
+Both draw one full-window canvas layer and absolutely positioned islands above it. The Rune
+shell now uses coss ui's neutral token set: a board menu island top left, a centred toolbar
+that only selects tools (lock, then the eleven tools), a three-dot overflow top right, and a
+fixed left tool-settings panel for the active drawing tool. The panel carries stroke swatches,
+closed-shape background and fill style, stroke-width presets, the pen pressure switch and
+opacity; Sticky replaces the stroke row with six note tints and Text colours statements with
+the stroke ink. It is hidden for Hand, Select, Eraser and zen mode. A bottom-left cluster holds zoom,
+canvas settings, the minimap and undo/redo. `Alt+Z` hides every island, closes any open panel,
+and leaves one hint; the same shortcut restores them. Settings is a fixed-height column panel
+with a sticky header and close button, help is a floating panel, and close/pin are centered
+modals.
 
 The Rune shell keeps its own small state machine in `app.rs` (`DoodleApp`) mirroring the
-eframe state, with `view.rs` building the element tree, `canvas.rs` drawing the grid and
-strokes into one `Shape`, `cards.rs` rendering AI cards, and `theme.rs` holding the light/dark
-palettes. Input precedence matches the eframe shell: pending import ghost, active stroke or
-erase gesture, active move, marquee, then idle shortcuts. Text fields consume keyboard input
-first. The canvas zooms on the wheel around the pointer, unless the pointer is over the
-settings or help panel or an AI card, whose scroll views take it; `Shift`+wheel pans
+eframe state, with `view.rs` building the element tree, `canvas.rs` drawing the grid, shape
+fills and strokes into one `Shape`, `cards.rs` rendering AI cards, and `theme.rs` holding the
+light/dark palettes. Input precedence matches the eframe shell: pending import ghost, active
+stroke or erase gesture, active move, marquee, then idle shortcuts. Text fields consume keyboard
+input first. The canvas zooms on the wheel around the pointer, unless the pointer is over the
+tool panel, settings or help panel or an AI card, whose scroll views take it; `Shift`+wheel pans
 horizontally. Island roots are hit-testable so clicks never fall through to the board.
 
-Rune has no per-vertex canvas mesh, so a pressure stroke is emitted as one `line` shape per
-segment, each with its own averaged width and round caps. That approximates the eframe
-tapered mesh at the cost of more draw instances; the segment budget is capped at 200k.
+Closed shapes paint their interior before the stroke. Solid fill is one filled polygon; hachure
+and cross-hatch are diagonal line families clipped analytically in screen space (polygon edge
+intersections for rectangles and diamonds, line/ellipse roots for ellipses). Spacing tracks zoom
+and stroke width, and the line count is capped so deep zoom-out stays cheap. Open paths ignore
+fill. The board background, grid ink and the Slate/Ink presets are neutral in both themes, and a
+sticky note picks light or dark ink from its own fill luminance so every note tint stays legible.
+
+Rune has no per-vertex canvas mesh, so a pressure stroke is emitted as width-bucketed line
+paths, each stroked once with round caps. That approximates the eframe tapered mesh at the cost
+of a slightly stepped width; the segment budget is capped at 200k.
 File dialogs use Rune's `Tx::open_file` / `Tx::save_file` (feature `native-file-dialog`), so
 headless runs can answer them with scripted `file-dialog` events. The app icon is set with
 `rune::set_app_icon` from the same `assets/app-icon.png` the eframe shell embeds.
@@ -133,7 +144,10 @@ Windows pen input is read by subclassing the window procedure and handling `WM_P
 `WM_POINTERUPDATE`, `WM_POINTERUP`, and `WM_POINTERLEAVE`. `GetPointerType` filters to pens;
 `GetPointerPenInfo` yields 0..1024 pressure, normalized to 0..1000 and stored atomically. The app
 polls it while sampling. Non-Windows targets and mice return `None`, which selects the simulated
-speed/progress envelope.
+speed response. Simulation is directional and has no elapsed-time term: a responsive speed EMA
+maps slow samples to thick ink and fast samples to thin ink. The pen panel's pressure switch
+turns simulation off for a constant-width mouse stroke; hardware pen pressure still wins when
+present.
 
 ## Determinism and limits
 
