@@ -276,3 +276,17 @@ untracked `scratch/ui/shapes.doodleverse` fixture fails postcard decode at the f
 (`DeserializeBadBool`), i.e. its wire layout predates the current types; the two other Nov-16
 board files decode and validate, and the fill fields are EOF-tolerant, so this is not a
 regression from the shape-fill change. No further changes were made after the pass.
+
+## Round 4 — pen feel, pen background, smooth wide ink (2026-11-19)
+
+Headless pass at 1180×760, dark default, `artifacts/round4-*.png`.
+
+| Change | Evidence |
+| --- | --- |
+| Slow/mid strokes keep one ink weight instead of swelling as the hand slows | `round4-both2-crop.png`: slow sine at constant weight |
+| Fast strokes are clearly thinner, clean 1–2pt line, no dashed fringe | same crop, lower line |
+| A stroke ends where the samples end, no end cap blot | `round4-slow-crop.png`: tapered end, no disc |
+| Pen panel shows Background with the transparent (cross) first swatch | `round4-panel.png` |
+| A pen loop that returns to its start fills with the chosen background | `round4-fillloop-crop.png`: sand disc under the ring |
+| Wide stroke at 1599% zoom draws one smooth band | `round4-chunk-crop.png` |
+| Legacy stroke payloads without a fill decode to transparent | `cargo test -p doodle-files` (`snapshot_written_before_stroke_fill_still_decodes`) |

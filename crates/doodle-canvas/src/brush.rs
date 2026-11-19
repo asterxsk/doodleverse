@@ -16,11 +16,11 @@ pub struct BrushSettings {
 impl Default for BrushSettings {
     fn default() -> Self {
         Self {
-            base_width: 4.0,
+            base_width: 2.0,
             pressure_sensitivity: 0.8,
             smoothing: 0.35,
             taper_start: 0.08,
-            taper_end: 0.0,
+            taper_end: 0.03,
             simulate_pressure: true,
         }
     }
@@ -53,7 +53,7 @@ impl BrushSettings {
             taper_end: if self.taper_end.is_finite() {
                 self.taper_end.clamp(0.0, 0.45)
             } else {
-                0.0
+                0.03
             },
             simulate_pressure: self.simulate_pressure,
         }
@@ -219,9 +219,13 @@ impl StrokeBuilder {
         // no elapsed-time term, so a stroke never grows just because it took longer. Speed is
         // converted to screen points per second so the response feels the same at every zoom:
         // the builder's `min_distance` is derived from the zoom (`0.7 / zoom`).
+        //
+        // The slow end is a flat plateau: below a walking pace the ink is at its full weight and
+        // stays there. A continuously rising response made the ink keep swelling as the hand
+        // slowed into a stop, which read as a blot oozing out rather than a stroke.
         let screen_speed = self.speed_ema * 0.7 / self.min_distance;
-        let speed_norm = (screen_speed / 300.0).clamp(0.0, 1.0);
-        (1.6 - 1.3 * speed_norm).clamp(0.25, 1.6)
+        let thin = smoothstep(((screen_speed - 60.0) / 420.0).clamp(0.0, 1.0));
+        1.45 - 0.95 * thin
     }
 
     #[must_use]

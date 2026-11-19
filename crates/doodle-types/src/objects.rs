@@ -115,10 +115,83 @@ impl StrokeGeometry {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// A freehand stroke: the sampled geometry plus its ink. `fill_rgba` is the paint used inside
+/// the loop a closed stroke encloses (alpha 0 means no fill); the pen's Background swatch writes
+/// it, matching Excalidraw's freedraw, whose loops carry a background colour.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct StrokeObject {
     pub style: StrokeStyle,
     pub geometry: StrokeGeometry,
+    pub fill_rgba: [u8; 4],
+}
+
+/// Postcard does not describe structs, so appended fields are not optional for `#[serde(default)]`
+/// alone: the decoder hits end-of-buffer instead of returning `None`. This visitor treats
+/// end-of-buffer after the legacy fields as "no fill", keeping boards and CRDT payloads written
+/// before the pen had a background colour readable.
+impl<'de> Deserialize<'de> for StrokeObject {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct StrokeVisitor;
+
+        impl<'de> Visitor<'de> for StrokeVisitor {
+            type Value = StrokeObject;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a stroke object")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let style = seq
+                    .next_element::<StrokeStyle>()?
+                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                let geometry = seq
+                    .next_element::<StrokeGeometry>()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+                let fill_rgba = match seq.next_element::<[u8; 4]>() {
+                    Ok(Some(value)) => value,
+                    Ok(None) => [0, 0, 0, 0],
+                    Err(error) if is_end_of_input(&error) => [0, 0, 0, 0],
+                    Err(error) => return Err(error),
+                };
+                Ok(StrokeObject {
+                    style,
+                    geometry,
+                    fill_rgba,
+                })
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut style = None;
+                let mut geometry = None;
+                let mut fill_rgba = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "style" => style = Some(map.next_value()?),
+                        "geometry" => geometry = Some(map.next_value()?),
+                        "fill_rgba" => fill_rgba = Some(map.next_value()?),
+                        other => return Err(de::Error::unknown_field(other, FIELDS)),
+                    }
+                }
+                Ok(StrokeObject {
+                    style: style.ok_or_else(|| de::Error::missing_field("style"))?,
+                    geometry: geometry.ok_or_else(|| de::Error::missing_field("geometry"))?,
+                    fill_rgba: fill_rgba.unwrap_or([0, 0, 0, 0]),
+                })
+            }
+        }
+
+        const FIELDS: &[&str] = &["style", "geometry", "fill_rgba"];
+        deserializer.deserialize_struct("StrokeObject", FIELDS, StrokeVisitor)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -635,6 +708,7 @@ mod tests {
                     y: 0.0,
                     width: 4.0,
                 }]),
+                fill_rgba: [0, 0, 0, 0],
             }),
         }
     }
@@ -780,6 +854,7 @@ mod tests {
                     width: 4.0,
                 },
             ]),
+            fill_rgba: [0, 0, 0, 0],
         };
         let object = StoredObject {
             id: ObjectId::new(),

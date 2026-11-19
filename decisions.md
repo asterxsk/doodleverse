@@ -629,3 +629,30 @@ authorized GitHub remote.
 - **Risk if wrong:** `.instant_changes()` also suppresses the intended scale fade *within* one
   tool's body changes (e.g. opacity value), which is acceptable because the panel's outer
   transition still runs on show/hide.
+
+### D49 — Ink weight plateaus, the stroke ends where the hand stops, and the pen takes a background
+- **Because:** using the app, the owner reported three things: the pen's Background row had gone
+  missing and fill could not be turned off; the pressure brush "keeps dying", because width kept
+  growing as the hand slowed right down; and every stroke closed in a round blot that reads as a
+  pool of ink rather than a lifted pen. The same report asked for Excalidraw-smooth edges at
+  wide widths.
+- **Decision:** the speed→pressure response is a plateau: below a walking pace the ink sits at
+  its full 1.45× weight and stacks no further, thinning smoothly to 0.5× at a brisk stroke.
+  The stroke's end has no cap disc — a short 3% end taper closes the band instead, so the line
+  ends where the samples end. The pen's tool panel shows the Background row (transparent first)
+  and `StrokeObject` carries `fill_rgba`: when a pen stroke comes back to its own start within
+  about its own width, its interior is filled before the ink is drawn, matching Excalidraw's
+  freedraw; an open scribble gets no fill. The old two-field stroke payload still decodes, via
+  an EOF-tolerant visitor, and the fill is written for committed strokes so a reload keeps it.
+  Edges: the ribbon fill is emitted as overlapping 32-point chained polygons (one ear-clipped
+  polygon of a thousand near-collinear vertices produced the lumpy edge), a sub-2pt stroke uses
+  one stroked polyline (chunk edges showed as a dashed fringe), and cap/joint discs take the
+  smoothed band width rather than the raw sample width, which is what poked out of the outline.
+- **Alternatives:** keep the continuous speed response and only clamp it (still reads as
+  swelling on a slow stop); a round end cap sized by the band (a lifted pen does not leave a
+  disc); storing pen fill only in app state (lost on reload).
+- **Reversibility:** cheap — the plateau is two constants in `brush.rs`; the fill is one field
+  and one predicate in `canvas.rs`; the chunk size and overlap are constants.
+- **Risk if wrong:** a self-crossing pen loop fills its nonzero-interior region rather than each
+  lobe separately, and a loop that does not quite close stays unfilled; both match freedraw
+  behaviour rather than a closed-shape fill.

@@ -543,8 +543,14 @@ impl DoodleApp {
         next_order_key(&self.projection)
     }
 
-    pub fn create_stroke(&mut self, pose: Pose, style: StrokeStyle, geometry: StrokeGeometry) {
-        match self.doc.create_stroke(pose, style, geometry) {
+    pub fn create_stroke(
+        &mut self,
+        pose: Pose,
+        style: StrokeStyle,
+        geometry: StrokeGeometry,
+        fill_rgba: [u8; 4],
+    ) {
+        match self.doc.create_stroke(pose, style, geometry, fill_rgba) {
             Ok(_) => {
                 self.hint_visible = false;
                 self.refresh();
@@ -1888,7 +1894,7 @@ impl DoodleApp {
             ));
             let (pose, geometry) = gesture.builder.finish();
             if geometry.is_valid() {
-                self.create_stroke(pose, gesture.style, geometry);
+                self.create_stroke(pose, gesture.style, geometry, self.fill_rgba);
             }
             return;
         }

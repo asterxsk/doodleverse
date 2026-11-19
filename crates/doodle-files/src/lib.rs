@@ -340,6 +340,7 @@ mod tests {
                         width: 6.0,
                     },
                 ]),
+                fill_rgba: [0, 0, 0, 0],
             }),
         }
     }
@@ -436,6 +437,13 @@ mod tests {
         style: doodle_types::StatementStyle,
     }
 
+    /// The stroke as it was written before the pen had a background colour: two fields only.
+    #[derive(serde::Serialize)]
+    struct LegacyStroke {
+        style: StrokeStyle,
+        geometry: doodle_types::StrokeGeometry,
+    }
+
     #[derive(serde::Serialize)]
     struct LegacyShape {
         shape: doodle_types::ShapeKind,
@@ -448,7 +456,7 @@ mod tests {
     #[allow(dead_code)]
     #[derive(serde::Serialize)]
     enum LegacyObjectKind {
-        Stroke(StrokeObject),
+        Stroke(LegacyStroke),
         Group,
         Statement(LegacyStatement),
         Shape(LegacyShape),
@@ -467,6 +475,47 @@ mod tests {
     struct LegacySnapshot {
         schema_version: u16,
         objects: Vec<LegacyStoredObject>,
+    }
+
+    #[test]
+    fn snapshot_written_before_stroke_fill_still_decodes() {
+        let legacy = LegacySnapshot {
+            schema_version: doodle_types::DOCUMENT_SCHEMA_VERSION,
+            objects: vec![LegacyStoredObject {
+                id: ObjectId::new(),
+                parent: None,
+                order_key: 0,
+                pose: Pose::new(5.0, 10.0),
+                kind: LegacyObjectKind::Stroke(LegacyStroke {
+                    style: StrokeStyle::default(),
+                    geometry: doodle_types::StrokeGeometry::new(vec![
+                        doodle_types::StrokePoint {
+                            x: 0.0,
+                            y: 0.0,
+                            width: 4.0,
+                        },
+                        doodle_types::StrokePoint {
+                            x: 30.0,
+                            y: 0.0,
+                            width: 4.0,
+                        },
+                    ]),
+                }),
+            }],
+        };
+        let bytes = wrap_legacy(&legacy, legacy.schema_version);
+
+        let decoded = decode_and_validate(&bytes).expect("legacy stroke decodes");
+        let stroke = decoded
+            .objects
+            .iter()
+            .find_map(|object| match &object.kind {
+                ObjectKind::Stroke(stroke) => Some(stroke),
+                _ => None,
+            })
+            .expect("stroke");
+        assert_eq!(stroke.geometry.points.len(), 2);
+        assert_eq!(stroke.fill_rgba, [0, 0, 0, 0]);
     }
 
     #[test]

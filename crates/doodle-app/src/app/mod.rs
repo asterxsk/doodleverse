@@ -274,7 +274,7 @@ impl DoodleApp {
         style: StrokeStyle,
         geometry: StrokeGeometry,
     ) {
-        match self.doc.create_stroke(pose, style, geometry) {
+        match self.doc.create_stroke(pose, style, geometry, [0, 0, 0, 0]) {
             Ok(_) => {
                 self.hint_visible = false;
                 self.refresh();

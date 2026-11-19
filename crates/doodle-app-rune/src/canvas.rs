@@ -121,6 +121,7 @@ pub fn scene(s: &DoodleApp, pal: &Palette) -> Shape {
                         projected.object.pose.y + offset.1,
                     ),
                     s_color(stroke.style.rgba),
+                    stroke.fill_rgba,
                     &mut budget,
                 );
             }
@@ -168,6 +169,7 @@ pub fn scene(s: &DoodleApp, pal: &Palette) -> Shape {
             &gesture.builder.current_geometry(),
             gesture.builder.current_pose(),
             s_color(gesture.style.rgba),
+            s.fill_rgba,
             &mut budget,
         );
     }
@@ -269,6 +271,7 @@ fn draw_stroke(
     geometry: &StrokeGeometry,
     pose: Pose,
     color: Color,
+    fill_rgba: [u8; 4],
     budget: &mut usize,
 ) {
     let zoom = s.zoom() as f32;
@@ -292,11 +295,28 @@ fn draw_stroke(
         fill_disc(shape, points[0].0, points[0].1, color);
         return;
     }
+    // A pen stroke that comes back to its own start encloses a region, and the pen's Background
+    // swatch paints it, the way Excalidraw's freedraw does. The centreline is closed implicitly
+    // by the fill, so only a stroke whose ends actually meet gets one; an open scribble keeps no
+    // background at all.
+    if fill_rgba[3] > 0 && *budget > 0 {
+        let (start, start_width) = points[0];
+        let (end, end_width) = points[points.len() - 1];
+        let gap = ((end[0] - start[0]).powi(2) + (end[1] - start[1]).powi(2)).sqrt();
+        if gap <= (start_width.max(end_width)).max(4.0) * 1.25 {
+            let polygon: Vec<[f32; 2]> = points.iter().map(|(at, _)| *at).collect();
+            *budget -= 1;
+            *shape = std::mem::take(shape).fill(polygon, s_color(fill_rgba));
+        }
+    }
     // Zoomed far out every measured width lands under one screen point. The ribbon outline then
     // paints a sub-pixel band whose edge staircase reads as pixelation. At that size the taper
     // is invisible anyway, so the stroke drops to one antialiased capsule polyline, the same
     // treatment a vector editor gives a scaled-down line; it fades smoothly instead of dithering.
-    if points.iter().all(|(_, width)| *width < 1.0) {
+    // The threshold also catches a thin fast stroke: below a couple of points the ribbon's
+    // antialiased chunk edges read as a dashed fringe along the line, while a plain stroked
+    // polyline stays a clean one-or-two-point line.
+    if points.iter().all(|(_, width)| *width < 1.6) {
         if *budget == 0 {
             return;
         }
@@ -318,8 +338,10 @@ fn draw_stroke(
         if center.len() < 2 {
             return;
         }
+        let line =
+            (points.iter().map(|(_, width)| *width).sum::<f32>() / points.len() as f32).max(1.0);
         *budget -= 1;
-        *shape = std::mem::take(shape).stroke(center, 1.0, color);
+        *shape = std::mem::take(shape).stroke(center, line, color);
         return;
     }
     // Each run is one filled outline whose edges interpolate the measured widths. Stroking
@@ -403,38 +425,109 @@ fn emit_stroke_run(
         return;
     }
     let last = points.len() - 1;
-    let mut left: Vec<[f32; 2]> = Vec::with_capacity(points.len());
-    let mut right: Vec<[f32; 2]> = Vec::with_capacity(points.len());
-    let mut direction = normalized_direction(points[0].0, points[1].0).unwrap_or([1.0, 0.0]);
-    for (index, (at, point_width)) in points.iter().enumerate() {
-        let local = if index == 0 {
+    let (left, right, band) = offset_chains(points);
+    // The band is filled as short chained runs rather than one outline polygon. A single outline
+    // over a long stroke is one ear-clipped polygon with a thousand nearly collinear vertices,
+    // and the triangulation there leaves visible lobes along the edge. A 32-point run is small
+    // enough to triangulate cleanly. Neighbouring runs overlap by one point so the antialiased
+    // end cap of one run sits under the opaque interior of the next instead of showing as a hair
+    // line; a full disc at the joint would instead poke out wherever a raw sample width exceeds
+    // the smoothed band.
+    const RUN: usize = 32;
+    const OVERLAP: usize = 1;
+    let mut run_start = 0;
+    while run_start < last {
+        if *budget == 0 {
+            return;
+        }
+        let run_end = (run_start + RUN).min(last);
+        let mut polygon: Vec<[f32; 2]> = Vec::with_capacity((run_end - run_start + 1) * 2);
+        polygon.extend_from_slice(&left[run_start..=run_end]);
+        for index in (run_start..=run_end).rev() {
+            polygon.push(right[index]);
+        }
+        *budget -= 1;
+        *shape = std::mem::take(shape).fill(polygon, color);
+        run_start = if run_end == last {
+            last
+        } else {
+            run_end - OVERLAP
+        };
+    }
+    // The start gets a round cap from the smoothed band width. The end is left as the band's own
+    // cut: a disc there read as an ink blot oozing past the last sample, and the short end taper
+    // already closes the stroke instead of chopping it square.
+    fill_disc(shape, points[0].0, band[0], color);
+}
+
+/// The two offset chains of a stroke run: each point pushed out along the smoothed normal by
+/// half the smoothed width. Raw accepted samples carry speed noise, and a width change of half a
+/// point every two screen points put a visible notch in the edge of a wide stroke; the same holds
+/// for the normals where central differences meet. Triangular taps keep the taper and the curve
+/// without the high-frequency wobble.
+fn offset_chains(points: &[([f32; 2], f32)]) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<f32>) {
+    let last = points.len() - 1;
+    let smoothed_width = |index: usize| -> f32 {
+        let mut sum = 0.0;
+        let mut weight = 0.0;
+        for (offset, tap) in [(-2i32, 1.0_f32), (-1, 2.0), (0, 3.0), (1, 2.0), (2, 1.0)] {
+            let at = index as i32 + offset;
+            if (0..=last as i32).contains(&at) {
+                sum += points[at as usize].1 * tap;
+                weight += tap;
+            }
+        }
+        sum / weight
+    };
+    let raw_tangent = |index: usize| -> Option<[f32; 2]> {
+        if index == 0 {
             normalized_direction(points[0].0, points[1].0)
         } else if index == last {
             normalized_direction(points[last - 1].0, points[last].0)
         } else {
             normalized_direction(points[index - 1].0, points[index + 1].0)
-                .or_else(|| normalized_direction(points[index - 1].0, *at))
-        };
-        if let Some(local) = local {
-            direction = local;
+                .or_else(|| normalized_direction(points[index - 1].0, points[index].0))
+        }
+    };
+    let mut tangents: Vec<[f32; 2]> = Vec::with_capacity(points.len());
+    for index in 0..points.len() {
+        tangents.push(raw_tangent(index).unwrap_or([1.0, 0.0]));
+    }
+    let smoothed: Vec<[f32; 2]> = (0..tangents.len())
+        .map(|index| {
+            let mut x = 0.0;
+            let mut y = 0.0;
+            for (offset, tap) in [(-1i32, 1.0_f32), (0, 2.0), (1, 1.0)] {
+                let at = index as i32 + offset;
+                if (0..tangents.len() as i32).contains(&at) {
+                    x += tangents[at as usize][0] * tap;
+                    y += tangents[at as usize][1] * tap;
+                }
+            }
+            let length = (x * x + y * y).sqrt();
+            if length > 0.000_1 {
+                [x / length, y / length]
+            } else {
+                tangents[index]
+            }
+        })
+        .collect();
+    let mut left: Vec<[f32; 2]> = Vec::with_capacity(points.len());
+    let mut right: Vec<[f32; 2]> = Vec::with_capacity(points.len());
+    let mut band: Vec<f32> = Vec::with_capacity(points.len());
+    let mut direction = smoothed[0];
+    for (index, (at, _)) in points.iter().enumerate() {
+        if index != 0 {
+            direction = smoothed[index];
         }
         let normal = [-direction[1], direction[0]];
-        let half = point_width.max(0.5) * 0.5;
+        let width = smoothed_width(index).max(0.5);
+        let half = width * 0.5;
+        band.push(width);
         left.push([at[0] + normal[0] * half, at[1] + normal[1] * half]);
         right.push([at[0] - normal[0] * half, at[1] - normal[1] * half]);
     }
-    let mut path = Path::new().move_to(left[0]);
-    for at in &left[1..] {
-        path = path.line_to(*at);
-    }
-    for at in right.iter().rev() {
-        path = path.line_to(*at);
-    }
-    // Round caps come from a disc at each end, matching the old stroked look.
-    *budget -= 3;
-    *shape = std::mem::take(shape).fill_path(&path.close(), color);
-    fill_disc(shape, points[0].0, points[0].1, color);
-    fill_disc(shape, points[last].0, points[last].1, color);
+    (left, right, band)
 }
 
 fn draw_shape(
@@ -961,7 +1054,15 @@ fn draw_pending_import(s: &DoodleApp, shape: &mut Shape, width: f32, height: f32
         let pose = Pose::new(object.pose.x + translation.0, object.pose.y + translation.1);
         match &object.kind {
             ObjectKind::Stroke(stroke) => {
-                draw_stroke(s, shape, &stroke.geometry, pose, color, &mut budget);
+                draw_stroke(
+                    s,
+                    shape,
+                    &stroke.geometry,
+                    pose,
+                    color,
+                    stroke.fill_rgba,
+                    &mut budget,
+                );
             }
             ObjectKind::Statement(statement) => {
                 let min = to_screen(s, pose.x, pose.y);
@@ -1256,5 +1357,43 @@ mod tests {
         assert!((start + 10.0).abs() < 1e-3);
         assert!((end - 10.0).abs() < 1e-3);
         assert!(ellipse_span(circle, [0.0, 20.0], [1.0, 0.0]).is_none());
+    }
+
+    #[test]
+    fn a_circle_outline_keeps_a_constant_radius() {
+        // A 45pt-radius circle sampled every 3pt with a constant 32pt width: every outline
+        // point must sit near radius 45 +/- 16. A notch or lobe here is what reads as a lumpy,
+        // mayonnaise-like stroke edge on a wide pen.
+        let points: Vec<([f32; 2], f32)> = (0..150)
+            .map(|index| {
+                let angle = std::f32::consts::TAU * index as f32 / 150.0;
+                ([45.0 * angle.cos(), 45.0 * angle.sin()], 32.0)
+            })
+            .collect();
+        let (left, right, band) = offset_chains(&points);
+        let radius = |at: [f32; 2]| (at[0] * at[0] + at[1] * at[1]).sqrt();
+        // The two chains are the inner and outer edge; which one `left` is depends on the
+        // winding, so the test checks the pair of radii rather than a side.
+        let outer = left
+            .iter()
+            .chain(right.iter())
+            .map(|at| radius(*at))
+            .fold(0.0_f32, f32::max);
+        let inner = left
+            .iter()
+            .chain(right.iter())
+            .map(|at| radius(*at))
+            .fold(f32::MAX, f32::min);
+        assert!(
+            (outer - 61.0).abs() < 1.0,
+            "outer radius drifted to {outer}"
+        );
+        assert!(
+            (inner - 29.0).abs() < 1.0,
+            "inner radius drifted to {inner}"
+        );
+        for width in band {
+            assert!((width - 32.0).abs() < 1.0, "band width drifted to {width}");
+        }
     }
 }

@@ -244,13 +244,18 @@ impl BoardDocument {
         pose: Pose,
         style: StrokeStyle,
         geometry: StrokeGeometry,
+        fill_rgba: [u8; 4],
     ) -> Result<DocumentOutcome, DocumentError> {
         let object = StoredObject {
             id: ObjectId::new(),
             parent: None,
             order_key: self.next_order_key(),
             pose,
-            kind: ObjectKind::Stroke(doodle_types::StrokeObject { style, geometry }),
+            kind: ObjectKind::Stroke(doodle_types::StrokeObject {
+                style,
+                geometry,
+                fill_rgba,
+            }),
         };
         if !object.is_valid() {
             return Err(CommandError::InvalidObject.into());
@@ -1246,6 +1251,7 @@ mod tests {
                         width: 6.0,
                     },
                 ]),
+                fill_rgba: [0, 0, 0, 0],
             }),
         }
     }

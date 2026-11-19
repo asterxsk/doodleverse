@@ -532,7 +532,9 @@ fn tool_settings_panel(s: &DoodleApp, pal: &Palette) -> El {
         body = body.child(panel_section(pal, "Background", note_row));
     }
 
-    if closed {
+    // The pen takes a background too: a stroke that loops back on itself paints its interior,
+    // matching Excalidraw's freedraw, and every tool needs the transparent choice either way.
+    if closed || s.tool_panel_pen() {
         let mut background_row = row().gap(6.0).items_center().w_full();
         for (key, name, rgba) in background_swatches() {
             let selected = s.fill_rgba == rgba;
@@ -548,7 +550,9 @@ fn tool_settings_panel(s: &DoodleApp, pal: &Palette) -> El {
             background_row = background_row.child(chip);
         }
         body = body.child(panel_section(pal, "Background", background_row));
+    }
 
+    if closed {
         let mut fills = row().gap(4.0).w_full();
         for (style, label) in [
             (FillStyle::Hachure, "Hachure"),
@@ -571,7 +575,7 @@ fn tool_settings_panel(s: &DoodleApp, pal: &Palette) -> El {
 
     if s.tool_panel_stroke_width() {
         let mut widths = row().gap(4.0).w_full();
-        for (value, label) in [(2.0_f32, "Thin"), (4.0, "Bold"), (8.0, "Extra")] {
+        for (value, label) in [(1.0_f32, "Thin"), (2.0, "Bold"), (4.0, "Extra")] {
             widths = widths.child(
                 theme::choice_button(
                     format!("tool-width-{label}"),

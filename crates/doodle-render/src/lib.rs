@@ -383,6 +383,7 @@ mod tests {
                             width: 6.0,
                         },
                     ]),
+                    fill_rgba: [0, 0, 0, 0],
                 }),
             })
             .collect();
