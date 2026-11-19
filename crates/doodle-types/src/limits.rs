@@ -2,10 +2,10 @@
 
 /// Maximum absolute world coordinate. Rendering is only claimed inside this range.
 pub const MAX_ABS_COORDINATE: f64 = 1.0e9;
-/// The board zooms between half size and 8× (800%); beyond that a pen stroke covers the view
+/// The board zooms between half size and 3× (300%); beyond that a pen stroke covers the view
 /// and the drawing loses its bearing.
 pub const MIN_ZOOM: f64 = 0.5;
-pub const MAX_ZOOM: f64 = 8.0;
+pub const MAX_ZOOM: f64 = 3.0;
 
 pub const MAX_OBJECTS: usize = 100_000;
 pub const MAX_STROKE_POINTS: usize = 200_000;

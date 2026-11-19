@@ -676,9 +676,9 @@ authorized GitHub remote.
 - **Risk if wrong:** the popover can overlap the panel on very narrow windows; it falls back to
   a fixed offset until the panel's layout is measured, which is the first frame only.
 
-### D51 — Zoom range is 50%–800%
-- **Because:** the owner asked for the zoom to cap at 800% with a 50% minimum: past 8× a pen stroke covers the view, and below half size a board is unreadable at the sizes people draw.
-- **Decision:** `MIN_ZOOM` 0.5, `MAX_ZOOM` 8.0 in `doodle-types/src/limits.rs`; the camera's clamp, wheel zoom and fit all read those constants, so the whole app (Rune and eframe) inherits it.
+### D51 — Zoom range is 50%–300%
+- **Because:** the owner asked for a 50% minimum and then for the top of the range to be 300%: past 3× a pen stroke covers the view, and below half size a board is unreadable at the sizes people draw.
+- **Decision:** `MIN_ZOOM` 0.5, `MAX_ZOOM` 3.0 in `doodle-types/src/limits.rs`; the camera's clamp, wheel zoom and fit all read those constants, so the whole app (Rune and eframe) inherits it.
 - **Alternatives:** capping only the wheel handler (the zoom-to-fit and preset paths would still exceed it).
 - **Reversibility:** trivial — two constants.
 - **Risk if wrong:** boards larger than about two screens no longer fit at 50%; the minimap still covers navigation.
