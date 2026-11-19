@@ -530,7 +530,10 @@ fn tool_settings_panel(s: &DoodleApp, pal: &Palette) -> El {
                 pal,
             )
             .label("Custom colour")
-            .on_press(|s: &mut DoodleApp| s.open_picker(ColourTarget::Stroke)),
+            .on_press_tx(|s: &mut DoodleApp, tx: &mut Tx| {
+                s.open_picker(ColourTarget::Stroke);
+                tx.focus_when_shown("picker-hex", false);
+            }),
         );
         body = body.child(panel_section(pal, "Stroke", stroke_row));
     }
@@ -573,7 +576,10 @@ fn tool_settings_panel(s: &DoodleApp, pal: &Palette) -> El {
                 pal,
             )
             .label("Custom background")
-            .on_press(|s: &mut DoodleApp| s.open_picker(ColourTarget::Fill)),
+            .on_press_tx(|s: &mut DoodleApp, tx: &mut Tx| {
+                s.open_picker(ColourTarget::Fill);
+                tx.focus_when_shown("picker-hex", false);
+            }),
         );
         body = body.child(panel_section(pal, "Background", background_row));
     }
@@ -1686,15 +1692,18 @@ fn colour_picker(s: &DoodleApp, pal: &Palette) -> El {
             .font(theme::section_style())
             .color(pal.muted),
     );
+    // The picker is a popover, not a modal, so `autofocus` never reaches this field; the swatch
+    // asks for focus by key when it opens the picker instead. Opening with the hex already
+    // selected then means typing replaces it.
     let field = text_input(&s.picker_hex, rune::tok::type_::BODY)
+        .key("picker-hex")
         .label("Hex colour")
         .on_edit(edit_access(|s: &mut DoodleApp| &mut s.picker_hex))
         .placeholder("#rrggbb", pal.muted)
         .color(pal.text)
         .caret(pal.text, pal.selection)
         .single_line()
-        .grow(1.0)
-        .autofocus();
+        .grow(1.0);
     let apply = theme::flat_icon_button("picker-apply", pal)
         .label("Apply hex colour")
         .child(icons::icon("check", 16.0, pal.text))

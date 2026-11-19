@@ -167,7 +167,18 @@ impl StrokeBuilder {
             return;
         }
 
-        let instant_speed = dist / dt;
+        // Some input pipelines deliver two samples with the same timestamp (a frame sample plus
+        // an event sample, or a coalesced pair). Clamping that zero interval to a microsecond
+        // turned ordinary movement into a thousand-point-per-second speed spike, and the width
+        // average then pulsed thick-thin-thick down a straight stroke: a chain of beads. A
+        // sub-millisecond gap carries no usable speed, so the average simply holds.
+        let instant_speed = if dt >= 1e-3 {
+            dist / dt
+        } else if self.speed_ema > f64::EPSILON {
+            self.speed_ema
+        } else {
+            dist / 0.016667
+        };
         if self.speed_ema <= f64::EPSILON {
             self.speed_ema = instant_speed;
         } else {
@@ -455,6 +466,43 @@ mod tests {
         assert!(
             (head - body).abs() < body * 0.1,
             "fast head {head} should match body {body}"
+        );
+    }
+
+    #[test]
+    fn a_repeated_timestamp_does_not_pulse_the_width() {
+        // A frame sample can arrive with the same timestamp as the pointer event that moved the
+        // stroke. Clamping that zero interval to a microsecond made a constant-speed trace look
+        // like a thousand-points-per-second flick, so the width average dropped to its floor and
+        // climbed back: a bead chain. The speed estimate must hold across such a sample.
+        let mut builder = StrokeBuilder::new(
+            BrushSettings::default(),
+            RawSample::new(Point::new(0.0, 0.0), None, 0.0),
+            0.5,
+        );
+        let mut time = 0.0;
+        for index in 1..=120 {
+            if index % 20 != 0 {
+                time += 0.016;
+            }
+            builder.push(RawSample::new(
+                Point::new(f64::from(index), 0.0),
+                None,
+                time,
+            ));
+        }
+        let (_, geometry) = builder.finish();
+        let widths: Vec<f32> = geometry
+            .points
+            .iter()
+            .skip(1)
+            .map(|point| point.width)
+            .collect();
+        let low = widths.iter().copied().fold(f32::MAX, f32::min);
+        let high = widths.iter().copied().fold(f32::MIN, f32::max);
+        assert!(
+            high <= low * 1.05,
+            "constant speed pulsed from {low} to {high}"
         );
     }
 

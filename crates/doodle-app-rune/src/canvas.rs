@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use doodle_render::grid_frame;
 use doodle_types::{
     FillStyle, ObjectKind, Point, Pose, Rect, ShapeKind, ShapeObject, StatementKind, StrokeGeometry,
@@ -299,13 +301,23 @@ fn draw_stroke(
     // swatch paints it, the way Excalidraw's freedraw does. The centreline is closed implicitly
     // by the fill, so only a stroke whose ends actually meet gets one; an open scribble keeps no
     // background at all. The same test closes the ink outline, so a loop has no cap bulges where
-    // its ends meet.
-    let (start, start_width) = points[0];
-    let (end, end_width) = points[points.len() - 1];
-    let gap = ((end[0] - start[0]).powi(2) + (end[1] - start[1]).powi(2)).sqrt();
-    let closed = gap <= (start_width.max(end_width)).max(4.0) * 1.25;
-    if fill_rgba[3] > 0 && closed && *budget > 0 {
-        let polygon: Vec<[f32; 2]> = points.iter().map(|(at, _)| *at).collect();
+    // its ends meet. The gap is measured in world units against the world widths: a screen-pixel
+    // floor made the same loop close at one zoom and open at another.
+    let (first, last) = (
+        geometry.points[0],
+        geometry.points[geometry.points.len() - 1],
+    );
+    let closed = stroke_ends_meet(
+        [first.x as f32, first.y as f32],
+        first.width,
+        [last.x as f32, last.y as f32],
+        last.width,
+    );
+    if fill_rgba[3] > 0
+        && closed
+        && *budget > 0
+        && let Some(polygon) = background_polygon(&points)
+    {
         *budget -= 1;
         *shape = std::mem::take(shape).fill(polygon, s_color(fill_rgba));
     }
@@ -350,9 +362,66 @@ fn draw_stroke(
     // outline carries the widths already resolved by the brush, so the slow plateau and the
     // taper survive without a second pressure pass. A very short stroke has no room for the
     // outline's caps, so it stays a capsule.
-    let outlines = stroke_outline(&points, closed);
-    let vertices: usize = outlines.iter().map(Vec::len).sum();
-    if outlines.is_empty() || vertices < 3 {
+    //
+    // A centreline that crosses itself cannot be outlined as one polygon: the ear clipper sees
+    // no ear at the crossing and falls back to a fan, which floods the enclosed lens with ink,
+    // while the repeated scan can also leave bead-like holes. Such a stroke is cut at the
+    // crossing into simple open pieces, each with its own round caps at the cut. A closure is
+    // appended first so a loop that crosses itself still draws its last edge.
+    // A centreline that crosses itself cannot be outlined as one polygon: the ear clipper sees
+    // no ear at the crossing and falls back to a fan, which floods the enclosed lens with ink.
+    // Such a stroke is cut at the crossing into simple open pieces, each with its own round caps
+    // at the cut. A closure is appended first so a loop that crosses itself still draws its last
+    // edge; a loop without crossings keeps the wrapped outline below.
+    let mut closed_scan;
+    let scan: &[([f32; 2], f32)] = if closed {
+        closed_scan = points.clone();
+        closed_scan.push(points[0]);
+        &closed_scan
+    } else {
+        &points
+    };
+    // A band's outline can cross itself even when its centreline does not: a stroke wider than
+    // the turn radius folds its inner edge over the outer one at a sharp corner or a retrace.
+    // The ear clipper then fans the polygon and floods the fold with ink. Such an outline falls
+    // back to a capsule strip; its round ends overlap the neighbouring segment's body, so an
+    // opaque band of one colour shows no seam, and unlike a self-intersecting outline it has no
+    // winding region to flood.
+    let mut fills: Vec<StrokeFill> = Vec::new();
+    let add_outlines = |outlines: Vec<Vec<[f32; 2]>>,
+                        fallback: &[([f32; 2], f32)],
+                        fills: &mut Vec<StrokeFill>| {
+        for outline in outlines {
+            if polygon_is_simple(&outline) {
+                fills.push(StrokeFill::Polygon(outline));
+            } else {
+                fills.push(StrokeFill::Capsules(fallback.to_vec()));
+            }
+        }
+    };
+    if earliest_crossing(scan).is_none() {
+        // A loop keeps its single wrapped outline, so a closed pen ring still has no cap bulges.
+        // Its capsule fallback has to bridge the closure explicitly.
+        let mut fallback = points.clone();
+        if closed && !points.is_empty() {
+            fallback.push(points[0]);
+        }
+        add_outlines(stroke_outline(&points, closed), &fallback, &mut fills);
+    } else {
+        for piece in split_at_self_intersections(scan) {
+            add_outlines(stroke_outline(&piece, false), &piece, &mut fills);
+        }
+    }
+    let vertices: usize = fills
+        .iter()
+        .map(|fill| match fill {
+            StrokeFill::Polygon(polygon) => polygon.len(),
+            StrokeFill::Capsules(_) => 0,
+        })
+        .sum();
+    if fills.is_empty()
+        || (vertices < 3 && !fills.iter().any(|f| matches!(f, StrokeFill::Capsules(_))))
+    {
         if *budget == 0 {
             return;
         }
@@ -381,13 +450,42 @@ fn draw_stroke(
     {
         return;
     }
-    for outline in outlines {
+    for fill in fills {
         if *budget == 0 {
             return;
         }
-        *budget -= 1;
-        *shape = std::mem::take(shape).fill(outline, color);
+        match fill {
+            StrokeFill::Polygon(polygon) => {
+                *budget -= 1;
+                *shape = std::mem::take(shape).fill(polygon, color);
+            }
+            StrokeFill::Capsules(path) => {
+                // Round-ended capsules overlap far enough that no shared edge shows; a quad strip
+                // sharing exact edges left a visible line at every joint.
+                for pair in path.windows(2) {
+                    if *budget == 0 {
+                        return;
+                    }
+                    let (a, b) = (pair[0].0, pair[1].0);
+                    let dx = b[0] - a[0];
+                    let dy = b[1] - a[1];
+                    if dx * dx + dy * dy < 0.01 {
+                        continue;
+                    }
+                    let line = ((pair[0].1 + pair[1].1) * 0.5).max(0.5);
+                    *budget -= 1;
+                    *shape = std::mem::take(shape).stroke(vec![a, b], line, color);
+                }
+            }
+        }
     }
+}
+
+/// What to paint for one outline: the filled polygon when the clipper can fill it, or the
+/// fallback capsule strip when the ribbon folds over itself.
+enum StrokeFill {
+    Polygon(Vec<[f32; 2]>),
+    Capsules(Vec<([f32; 2], f32)>),
 }
 
 /// perfect-freehand's constants (`src/constants.ts`), in screen points.
@@ -765,6 +863,256 @@ fn simplify_polyline(points: &[[f32; 2]], tolerance: f32) -> Vec<[f32; 2]> {
         .zip(keep)
         .filter_map(|(point, keep)| keep.then_some(*point))
         .collect()
+}
+
+/// Whether a pen stroke's two ends meet. The test lives in world units: the two round ends
+/// touch when the gap between the centreline ends is no more than the two radii added together.
+/// Measuring the screen gap with a pixel floor made the same loop closed at one zoom and open at
+/// another; comparing world coordinates against the world widths keeps the decision fixed for
+/// the stroke. A few-world-point gap therefore stays open, while a loop whose ends truly land on
+/// each other closes.
+fn stroke_ends_meet(first: [f32; 2], first_width: f32, last: [f32; 2], last_width: f32) -> bool {
+    let gap = ((last[0] - first[0]).powi(2) + (last[1] - first[1]).powi(2)).sqrt();
+    let reach = (first_width.max(0.0) + last_width.max(0.0)) * 0.5;
+    gap <= reach
+}
+
+/// The polygon painted by the Background swatch. A loop's centreline arrives with duplicate
+/// consecutive samples and, at high zoom, runs of near-coincident points; an ear clipper given
+/// those can miss and turn the fill into a fan that spills or vanishes. Dedupe, drop a repeated
+/// closing vertex and simplify first; a shape with fewer than three non-collinear points is not
+/// a region at all and stays unfilled. The tolerance is in screen points, so the same loop fills
+/// at 50%, 100% and 800%.
+fn background_polygon(points: &[([f32; 2], f32)]) -> Option<Vec<[f32; 2]>> {
+    const MIN_STEP_SQUARED: f32 = 0.01;
+    let mut polygon: Vec<[f32; 2]> = Vec::with_capacity(points.len());
+    for (at, _) in points {
+        let keep = polygon.last().is_none_or(|last| {
+            let dx = at[0] - last[0];
+            let dy = at[1] - last[1];
+            dx * dx + dy * dy > MIN_STEP_SQUARED
+        });
+        if keep {
+            polygon.push(*at);
+        }
+    }
+    if polygon.len() > 1 {
+        let first = polygon[0];
+        let last = polygon[polygon.len() - 1];
+        let dx = last[0] - first[0];
+        let dy = last[1] - first[1];
+        if dx * dx + dy * dy <= MIN_STEP_SQUARED {
+            polygon.pop();
+        }
+    }
+    let polygon = simplify_polyline(&polygon, 0.3);
+    if polygon.len() < 3 {
+        return None;
+    }
+    // Shoelace area: zero means every point sits on one line, which has no interior to paint.
+    let mut area = 0.0_f32;
+    for index in 0..polygon.len() {
+        let a = polygon[index];
+        let b = polygon[(index + 1) % polygon.len()];
+        area += a[0] * b[1] - b[0] * a[1];
+    }
+    (area.abs() > 0.1).then_some(polygon)
+}
+
+/// The earliest self-crossing of the polyline, or `None`. Segments are bucketed in a coarse
+/// screen-space grid, so a stroke that never crosses only tests its immediate neighbours and
+/// stays linear in the sample count; comparing every pair would cost O(n²) on every frame. Only
+/// proper interior crossings count: segments that merely share a vertex, touch end to end or lie
+/// on top of each other are left for the outline builder, whose decimation already collapses
+/// duplicates.
+fn earliest_crossing(points: &[([f32; 2], f32)]) -> Option<(usize, usize, ([f32; 2], f32))> {
+    const CELL: f32 = 8.0;
+    const MAX_CELLS: i64 = 8_192;
+    if points.len() < 4 {
+        return None;
+    }
+    let cell_of = |at: [f32; 2]| ((at[0] / CELL).floor() as i32, (at[1] / CELL).floor() as i32);
+    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+    for index in 0..points.len() - 1 {
+        let a = points[index].0;
+        let b = points[index + 1].0;
+        if (b[0] - a[0]).abs() < 1e-6 && (b[1] - a[1]).abs() < 1e-6 {
+            continue;
+        }
+        let (min_x, max_x) = (a[0].min(b[0]), a[0].max(b[0]));
+        let (min_y, max_y) = (a[1].min(b[1]), a[1].max(b[1]));
+        let (x0, y0) = cell_of([min_x, min_y]);
+        let (x1, y1) = cell_of([max_x, max_y]);
+        let mut best: Option<(usize, f32, f32)> = None;
+        let cells = (i64::from(x1) - i64::from(x0) + 1) * (i64::from(y1) - i64::from(y0) + 1);
+        if cells <= MAX_CELLS {
+            for x in x0..=x1 {
+                for y in y0..=y1 {
+                    if let Some(occupants) = grid.get(&(x, y)) {
+                        for &other in occupants {
+                            // Adjacent segments share a vertex by construction, not by crossing.
+                            if other + 1 >= index {
+                                continue;
+                            }
+                            if let Some((t, u)) =
+                                segment_crossing(a, b, points[other].0, points[other + 1].0)
+                                && best.is_none_or(|(seen, ..)| other < seen)
+                            {
+                                best = Some((other, t, u));
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // A single segment spanning thousands of cells is pathological; fall back to the
+            // linear test rather than allocate the bucket range.
+            for other in 0..index.saturating_sub(1) {
+                if let Some((t, u)) = segment_crossing(a, b, points[other].0, points[other + 1].0)
+                    && best.is_none_or(|(seen, ..)| other < seen)
+                {
+                    best = Some((other, t, u));
+                }
+            }
+        }
+        if let Some((other, t, u)) = best {
+            let at = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+            // The crossing becomes one shared vertex in both pieces; averaging the two segments'
+            // interpolated widths keeps the band the same weight whichever side arrives there.
+            let arriving = points[other].1 + (points[other + 1].1 - points[other].1) * u;
+            let leaving = points[index].1 + (points[index + 1].1 - points[index].1) * t;
+            return Some((index, other, (at, (arriving + leaving) * 0.5)));
+        }
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                grid.entry((x, y)).or_default().push(index);
+            }
+        }
+    }
+    None
+}
+
+/// The parameter along `a`→`b` where it properly crosses `c`→`d`. Proper means both parameters
+/// strictly inside the segments: an end-to-end touch is a join, not a crossing, and splitting
+/// there would leave an endpoint duplicate that the next scan considers again.
+fn segment_crossing(a: [f32; 2], b: [f32; 2], c: [f32; 2], d: [f32; 2]) -> Option<(f32, f32)> {
+    // The margin keeps float noise at a shared vertex from reading as a crossing: a cut within
+    // a fiftieth of a segment of an existing vertex would only duplicate that vertex and the
+    // splitter would find the same crossing again.
+    const EDGE: f32 = 0.02;
+    let cross = |u: [f32; 2], v: [f32; 2]| u[0] * v[1] - u[1] * v[0];
+    let r = [b[0] - a[0], b[1] - a[1]];
+    let s = [d[0] - c[0], d[1] - c[1]];
+    let denominator = cross(r, s);
+    if denominator.abs() < 1e-6 {
+        return None;
+    }
+    let q = [c[0] - a[0], c[1] - a[1]];
+    let t = cross(q, s) / denominator;
+    let u = cross(q, r) / denominator;
+    (t > EDGE && t < 1.0 - EDGE && u > EDGE && u < 1.0 - EDGE).then_some((t, u))
+}
+
+/// Cut the polyline at its crossings until every piece is simple. A crossing between a later
+/// segment and an earlier one splits the path into two: the loop between the two visits, and the
+/// rest of the stroke that skips over that loop. Simply ending one half at the crossing leaves
+/// the crossing inside the other half's body, where the outline's cap meets the band at a
+/// T-junction and crosses itself again, so both segments are cut at the shared point. The
+/// crossing is stored with its interpolated width, so each piece keeps the band's weight through
+/// the join. A clean stroke has no crossing and comes back as the single input piece.
+fn split_at_self_intersections(points: &[([f32; 2], f32)]) -> Vec<Vec<([f32; 2], f32)>> {
+    // A scribble with hundreds of crossings would produce a shape per crossing; cap the work at
+    // a count that still covers any plausible hand stroke and leave the rest unsplit.
+    const MAX_PIECES: usize = 128;
+    let mut pieces = Vec::new();
+    let mut pending = vec![points.to_vec()];
+    while let Some(piece) = pending.pop() {
+        if pieces.len() + pending.len() >= MAX_PIECES {
+            pieces.push(piece);
+            continue;
+        }
+        match earliest_crossing(&piece) {
+            Some((index, other, crossing)) => {
+                // The loop: enter at the crossing, walk the path up to where it was first
+                // crossed, and come back. Its endpoints are the same point, which the open
+                // outline closes with two coincident round caps.
+                let mut loop_piece = Vec::with_capacity(index - other + 2);
+                loop_piece.push(crossing);
+                loop_piece.extend_from_slice(&piece[other + 1..=index]);
+                loop_piece.push(crossing);
+                // The rest: the path before the first visit, the crossing, then the path after
+                // the second visit.
+                let mut outside = Vec::with_capacity(piece.len() - (index - other) + 1);
+                outside.extend_from_slice(&piece[..=other]);
+                outside.push(crossing);
+                outside.extend_from_slice(&piece[index + 1..]);
+                pending.push(loop_piece);
+                pending.push(outside);
+            }
+            None => pieces.push(piece),
+        }
+    }
+    pieces
+}
+
+/// Whether a closed polygon has no crossing edges. The ear clipper needs this: its fallback fan
+/// paints a non-simple outline as a solid blob, which on a ribbon means the fold is flooded with
+/// stroke colour. Edges are bucketed in the same coarse grid as the centreline scan, so a clean
+/// outline costs linear time; only real edge crossings are reported, since adjacent edges share
+/// an endpoint by construction.
+fn polygon_is_simple(points: &[[f32; 2]]) -> bool {
+    const CELL: f32 = 8.0;
+    const MAX_CELLS: i64 = 8_192;
+    let count = points.len();
+    if count < 3 {
+        return true;
+    }
+    let cell_of = |at: [f32; 2]| ((at[0] / CELL).floor() as i32, (at[1] / CELL).floor() as i32);
+    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+    for index in 0..count {
+        let a = points[index];
+        let b = points[(index + 1) % count];
+        if (b[0] - a[0]).abs() < 1e-6 && (b[1] - a[1]).abs() < 1e-6 {
+            continue;
+        }
+        let (x0, y0) = cell_of([a[0].min(b[0]), a[1].min(b[1])]);
+        let (x1, y1) = cell_of([a[0].max(b[0]), a[1].max(b[1])]);
+        let cells = (i64::from(x1) - i64::from(x0) + 1) * (i64::from(y1) - i64::from(y0) + 1);
+        let adjacent = |other: usize| (other + 1) % count == index || (index + 1) % count == other;
+        if cells <= MAX_CELLS {
+            for x in x0..=x1 {
+                for y in y0..=y1 {
+                    if let Some(occupants) = grid.get(&(x, y)) {
+                        for &other in occupants {
+                            if adjacent(other) {
+                                continue;
+                            }
+                            if segment_crossing(a, b, points[other], points[(other + 1) % count])
+                                .is_some()
+                            {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            for other in 0..index {
+                if adjacent(other) {
+                    continue;
+                }
+                if segment_crossing(a, b, points[other], points[(other + 1) % count]).is_some() {
+                    return false;
+                }
+            }
+        }
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                grid.entry((x, y)).or_default().push(index);
+            }
+        }
+    }
+    true
 }
 
 /// The inside vertices of a round cap arc from `from` to `to` around `center`, bulging toward
@@ -1763,6 +2111,85 @@ mod tests {
                 next[0]
             );
         }
+    }
+
+    #[test]
+    fn a_crossing_stroke_splits_into_simple_pieces() {
+        // An X written as one stroke crosses at its centre. Left whole, the outline polygon is
+        // non-simple: the clipper fans and the enclosed lens floods with ink. The splitter must
+        // return simple halves, each retaining the crossing point and its width.
+        let points: Vec<([f32; 2], f32)> = vec![
+            ([0.0, 0.0], 4.0),
+            ([40.0, 40.0], 4.0),
+            ([80.0, 0.0], 4.0),
+            ([80.0, 80.0], 4.0),
+            ([0.0, 80.0], 4.0),
+            ([40.0, 40.0], 4.0),
+            ([20.0, 90.0], 4.0),
+        ];
+        assert!(
+            earliest_crossing(&points).is_some(),
+            "the X was not detected"
+        );
+        let pieces = split_at_self_intersections(&points);
+        assert!(pieces.len() > 1, "a crossing stroke stayed one piece");
+        for piece in &pieces {
+            assert!(
+                earliest_crossing(piece).is_none(),
+                "a split piece still crosses itself"
+            );
+            assert!(piece.len() >= 2, "a split piece collapsed");
+            for (at, width) in piece {
+                assert!(at[0].is_finite() && at[1].is_finite());
+                assert!((*width - 4.0).abs() < 0.01);
+            }
+        }
+    }
+
+    #[test]
+    fn a_straight_or_gentle_stroke_is_one_piece() {
+        let line: Vec<([f32; 2], f32)> = (0..=40).map(|i| ([i as f32, 0.0], 4.0)).collect();
+        assert!(earliest_crossing(&line).is_none());
+        assert_eq!(split_at_self_intersections(&line).len(), 1);
+        let curve: Vec<([f32; 2], f32)> = (0..=60)
+            .map(|i| {
+                let angle = std::f32::consts::TAU * i as f32 / 60.0 * 0.75;
+                ([30.0 * angle.cos(), 30.0 * angle.sin()], 4.0)
+            })
+            .collect();
+        assert_eq!(split_at_self_intersections(&curve).len(), 1);
+    }
+
+    #[test]
+    fn closure_is_measured_in_world_units() {
+        // The round ends touch only when the centreline gap is within the two radii. A five
+        // world-point gap with a two-point-wide band must stay open at every zoom; the call
+        // takes world coordinates, so no screen scale can flip it.
+        assert!(!stroke_ends_meet([0.0, 0.0], 2.0, [5.0, 0.0], 2.0));
+        assert!(stroke_ends_meet([0.0, 0.0], 2.0, [1.5, 0.0], 2.0));
+        assert!(stroke_ends_meet([0.0, 0.0], 2.0, [2.0, 0.0], 2.0));
+        assert!(!stroke_ends_meet([0.0, 0.0], 2.0, [2.5, 0.0], 2.0));
+    }
+
+    #[test]
+    fn the_background_polygon_drops_duplicates_and_degenerate_shapes() {
+        // A loop arrives with its start repeated at the end plus a duplicate sample; the fill
+        // must remove both. A straight line has no interior and must not paint.
+        let square: Vec<([f32; 2], f32)> = vec![
+            ([0.0, 0.0], 4.0),
+            ([0.0, 0.0], 4.0),
+            ([100.0, 0.0], 4.0),
+            ([100.0, 100.0], 4.0),
+            ([0.0, 100.0], 4.0),
+            ([0.0, 0.0], 4.0),
+        ];
+        let polygon = background_polygon(&square).expect("square should fill");
+        assert!(polygon.len() >= 4, "fill lost the square's corners");
+        for pair in polygon.windows(2) {
+            assert!(pair[0] != pair[1], "fill kept a duplicate point");
+        }
+        let line: Vec<([f32; 2], f32)> = (0..=10).map(|i| ([i as f32 * 10.0, 0.0], 4.0)).collect();
+        assert!(background_polygon(&line).is_none(), "a line must not fill");
     }
 
     #[test]

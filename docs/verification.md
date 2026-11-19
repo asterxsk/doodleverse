@@ -310,3 +310,19 @@ Headless pass at 1180×760, dark default, evidence in `artifacts/round5/`.
 | A fast 800% stroke starts at body width, no fat head | `fast800-head-zoom.png` (2→20 px over the cap, constant 20 through the body) |
 | Opening the colour picker preselects the current hex | `cargo test -p doodle-app-rune`; manual pass pending |
 | Gate | `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`, `cargo build --workspace --release --locked` all green |
+
+## Round 6 — self-crossing ink, zoom-stable closure, bead fix (2026-11-19)
+
+Headless pass at 1180×760, dark default, evidence in `artifacts/round6/`.
+
+| Change | Evidence |
+| --- | --- |
+| A one-stroke X at 800% draws a band only: no lens fill, no beads | `widex800-crop.png` (own repro), `x800-crop.png` |
+| A lasso loop no longer fills its lens; the diagonal has no dotted fringe | `lasso200-crop.png`, `lasso800-crop.png` |
+| Two overlapping loops in one stroke show two bands, no fill between | `doubleloop-crop.png` |
+| A closed thick loop with Sand background fills at 50%, 100% and 800% | `closedloop-fill-z50.png`, `closedloop-fill-z100.png`, `closedloop-fill-z800.png` |
+| The same loop with a real gap stays open and unfilled at every zoom (gap visible at 800%) | `closedloop-gap-z50.png`, `closedloop-gap-z100.png`, `closedloop-gap-z800.png` |
+| Fast strokes no longer bead on straight runs (sub-millisecond samples hold the speed) | `cargo test -p doodle-canvas` (repeated-timestamp width stability) |
+| Opening the picker focuses its hex field with the value selected | manual pass pending |
+| Round-5 800% Bold/Extra rings unharmed | `artifacts/round5/loop.png`, `hizoom-bold.png` rerendered |
+| Gate | fmt, clippy `-D warnings`, tests, release build all green |
