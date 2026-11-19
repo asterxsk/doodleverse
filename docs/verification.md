@@ -246,6 +246,10 @@ for the icon glyphs.
 | Pen and sticky cursors rasterised from the same glyphs with a white halo; hotspots on the tip and note corner | Verified by regenerating the PNGs and reading them back; hotspots `[7.5,24.5]` and `[6.3,6.3]` |
 | Far-zoom AA: strokes below one screen point drop to one 1pt antialiased polyline | Verified at 3% and ~17% zoom in `50-farzoom-aa*.png` and `51-far/out-crop.png`; no staircase |
 | Taper unchanged at normal zoom: filled outline run with round end discs | Verified in `41-dark-taper.png` after the change |
+| Selected tool, grid kind and theme presets use coss's `bg-input/64` pressed wash with primary ink, radius 8 segmented controls | Verified in `artifacts/critic/after-settings.png` |
+| Canvas settings and Shortcuts & about open without panicking (the two `icon("x")` calls were a regression) | Verified headlessly; settings frame in `artifacts/critic/after-settings.png` |
+| Light theme reachable from Canvas settings → Paper light | Verified in `artifacts/critic/light-reachable.png` |
+| Menu/overflow popovers use coss `p-1`, stacked 28pt rows, radius 8 | Verified in `artifacts/critic/menu-crop.png` |
 
 Gate for this pass: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets
 --locked -- -D warnings`, `cargo test --workspace --locked` (101 passed, 1 ignored — the cursor

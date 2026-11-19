@@ -29,7 +29,6 @@ pub struct Palette {
     pub hover: Color,
     pub press: Color,
     pub selected_bg: Color,
-    pub selected_ink: Color,
     pub shadow: Color,
     pub scrim: Color,
     pub statement_ink: Color,
@@ -71,7 +70,6 @@ pub fn palette(light: bool) -> Palette {
             hover: color([0, 0, 0, 10]),
             press: color([0, 0, 0, 20]),
             selected_bg: color([38, 38, 38, 255]),
-            selected_ink: color([250, 250, 250, 255]),
             shadow: color([0, 0, 0, 26]),
             scrim: color([0, 0, 0, 82]),
             statement_ink: color([45, 40, 28, 255]),
@@ -93,7 +91,6 @@ pub fn palette(light: bool) -> Palette {
             hover: color([255, 255, 255, 10]),
             press: color([255, 255, 255, 20]),
             selected_bg: color([245, 245, 245, 255]),
-            selected_ink: color([38, 38, 38, 255]),
             shadow: color([0, 0, 0, 90]),
             scrim: color([0, 0, 0, 82]),
             statement_ink: color([45, 40, 28, 255]),
@@ -101,10 +98,10 @@ pub fn palette(light: bool) -> Palette {
     }
 }
 
-/// coss ui's radius scale: `--radius-lg` 10 for popover/menu surfaces, `--radius-md` 8 for
-/// controls, `--radius-xl` 12 for the toolbar, `--radius-2xl` 16 for dialogs, `--radius-sm` 6
-/// for menu items.
-pub const RADIUS_SURFACE: f32 = 10.0;
+/// coss ui's radius scale on Tailwind's defaults: `rounded-lg` 8 for buttons, inputs, popovers
+/// and menu surfaces, `rounded-md` 6 for menu items, `rounded-xl` 12 for the toolbar and
+/// `rounded-2xl` 16 for dialogs.
+pub const RADIUS_SURFACE: f32 = 8.0;
 pub const RADIUS_CONTROL: f32 = 8.0;
 pub const RADIUS_TOOLBAR: f32 = 12.0;
 pub const RADIUS_DIALOG: f32 = 16.0;
@@ -120,6 +117,15 @@ pub fn caption() -> rune::TextStyle {
 
 pub fn heading(size: f32) -> rune::TextStyle {
     rune::TextStyle::new(size, 650.0)
+}
+
+/// coss `bg-input/64`: the pressed state of a toggle or toolbar button, a translucent input
+/// wash over the card rather than a filled primary surface.
+pub fn pressed_fill(pal: &Palette) -> Color {
+    Color {
+        a: pal.input.a * 0.64,
+        ..pal.input
+    }
 }
 
 /// Column variant of [`island`], for panels whose content stacks vertically and may scroll.
@@ -248,60 +254,66 @@ pub fn menu_row_icon(key: impl Into<String>, label: &str, icon: &str, pal: &Pale
 pub fn tool_button(key: impl Into<String>, selected: bool, pal: &Palette) -> El {
     el().key(key)
         .size(32.0, 32.0)
-        .radius(RADIUS_SURFACE)
+        .radius(RADIUS_CONTROL)
         .items_center()
         .justify_center()
         .checked(selected)
         .fill(if selected {
-            pal.selected_bg
+            pressed_fill(pal)
         } else {
             Color::TRANSPARENT
         })
-        .hover(if selected { pal.selected_bg } else { pal.hover })
+        .hover(pal.hover)
         .press(pal.press)
 }
 
 pub fn active_button(key: impl Into<String>, label: &str, active: bool, pal: &Palette) -> El {
-    let fill = if active { pal.selected_bg } else { pal.card };
-    let ink = if active { pal.selected_ink } else { pal.text };
+    // coss Toggle: transparent border, accent hover, `bg-input/64` while pressed, label stays
+    // in the primary ink. `checked` carries the same pressed state to assistive technology.
     el().key(key)
-        .padding(8.0)
+        .h(28.0)
+        .px(10.0)
         .radius(RADIUS_CONTROL)
-        .fill(fill)
-        // The fill shows which option is active; `checked` says the same to assistive
-        // technology (Rune's pressed/toggled state).
+        .items_center()
+        .fill(if active {
+            pressed_fill(pal)
+        } else {
+            Color::TRANSPARENT
+        })
         .checked(active)
         .hover(pal.hover)
         .press(pal.press)
-        .border(1.0, if active { pal.selected_bg } else { pal.border })
         .motion(motion::SNAPPY)
         .child(
             text(label)
-                .font(tok::TextStyle::new(12.0, 600.0))
-                .color(ink),
+                .font(tok::TextStyle::new(14.0, 500.0))
+                .color(pal.text),
         )
 }
 
 /// A compact choice inside a panel row: three fill styles or three width presets fit the
 /// 184pt inner width without wrapping.
 pub fn choice_button(key: impl Into<String>, label: &str, active: bool, pal: &Palette) -> El {
-    let fill = if active { pal.selected_bg } else { pal.card };
-    let ink = if active { pal.selected_ink } else { pal.text };
+    // coss Toggle (sm): 28 tall, 14/500, pressed = `bg-input/64`.
     el().key(key)
-        .padding(6.0)
+        .h(28.0)
+        .px(8.0)
         .radius(RADIUS_CONTROL)
-        .fill(fill)
+        .fill(if active {
+            pressed_fill(pal)
+        } else {
+            Color::TRANSPARENT
+        })
         .checked(active)
         .items_center()
         .justify_center()
         .hover(pal.hover)
         .press(pal.press)
-        .border(1.0, if active { pal.selected_bg } else { pal.border })
         .motion(motion::SNAPPY)
         .child(
             text(label)
-                .font(rune::TextStyle::new(11.0, 600.0))
-                .color(ink),
+                .font(rune::TextStyle::new(14.0, 500.0))
+                .color(pal.text),
         )
 }
 
@@ -376,14 +388,12 @@ pub fn swatch(key: impl Into<String>, rgba: [u8; 4], selected: bool, pal: &Palet
 /// icon that sits centred above it. The ink follows the button's state: a selected tool is a
 /// filled primary surface, so its badge uses the primary-foreground ink and clears WCAG AA
 /// there; an unselected one uses the dedicated badge ink on the card.
-pub fn key_badge(key: &str, selected: bool, pal: &Palette) -> El {
+pub fn key_badge(key: &str, pal: &Palette) -> El {
+    // The pressed toolbar fill is a translucent input wash, so one badge ink works on both
+    // states.
     text(key)
         .font(rune::TextStyle::new(10.0, 600.0))
-        .color(if selected {
-            pal.selected_ink
-        } else {
-            pal.badge_ink
-        })
+        .color(pal.badge_ink)
         // Text is drawn, not focused; the button's label and help already announce the tool.
         .role("none")
         .pin(None, None, Some(3.0), Some(1.0))

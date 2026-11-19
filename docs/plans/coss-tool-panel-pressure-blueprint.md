@@ -142,4 +142,11 @@ Component anatomy:
   `51-mid/out/far*.png`, `53-toolbar-crop.png`, `54-panel-crop.png`.
 - Gate (final revision): fmt check clean, clippy `-D warnings` clean, 101 workspace tests
   passed (1 ignored, the cursor regeneration), release build finished.
+- Critic pass 1 (fresh): 62%, five of seven must-haves. Confirmed gaps: `icon("x")` panic when
+  opening Canvas settings or Shortcuts & about (light mode unreachable), filled-primary selected
+  tool instead of coss's `bg-input/64` pressed wash, control radius 10 instead of 8, segmented
+  choices not using coss Toggle type, menu popup padding 8 instead of `p-1`. Fixed in the
+  revision: icon name, pressed states for tools/toggles, Tailwind radius scale, 28pt 14/500
+  segmented controls, menu `p-1`, stale `assets/icons/lucide` removed. Residual: arrow/line panels
+  have no arrowhead-style controls, and help is a floating panel rather than a coss Dialog.
 - Critic passes: see below.

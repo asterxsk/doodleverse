@@ -594,11 +594,15 @@ authorized GitHub remote.
 ### D47 — The chrome follows coss ui component anatomy and motion
 - **Because:** the follow-up brief asked for every UI element to match coss, especially dark mode,
   with the same smooth animations. Tokens carry coss dark values (`#161616` background, `#1b1b1b`
-  card, 6% border, 8% input, 14/500 button type, radius 10/8/12/16/6); Slider is track h-4,
-  primary indicator, 16pt white thumb with input border and a 1.2 press scale; Switch is an
-  18x30 track with a 16pt thumb and a 150ms spring; Toolbar is a `rounded-xl` card with 32pt
-  buttons and 1px group separators; menus, dialogs and floating panels enter with coss's scale
-  (0.96–0.98) and fade on Rune's `motion::SNAPPY`. Hover/press tokens are 4%/8% alpha overlays.
+  card, 6% border, 8% input, 14/500 button type, Tailwind radius scale: `rounded-lg` 8 for
+  buttons, toggles and popovers, `rounded-md` 6 for menu items, `rounded-xl` 12 for the
+  toolbar, `rounded-2xl` 16 for dialogs); Slider is track h-4, primary indicator, 16pt white
+  thumb with input border and a 1.2 press scale; Switch is an 18x30 track with a 16pt thumb and
+  a 150ms spring; Toolbar is a `rounded-xl` card with 32pt buttons and 1px group separators;
+  a pressed tool or toggle is coss's `bg-input/64` translucent wash with the primary ink — not
+  a filled primary chip; segmented choices are 28pt 14/500 Toggles; menus use `p-1` and the
+  scale-and-fade popup motion (0.96–0.98), as do dialogs and floating panels, on Rune's
+  `motion::SNAPPY`. Hover/press tokens are 4%/8% alpha overlays.
 - **Alternatives:** keep bespoke chrome (the brief explicitly replaces it); animate with the
   default fade only (the brief asks for the same animations).
 - **Reversibility:** cheap — `theme.rs` holds every token and component constructor.

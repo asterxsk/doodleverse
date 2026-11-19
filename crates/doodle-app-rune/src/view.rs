@@ -374,7 +374,7 @@ fn overflow_scrim() -> El {
 }
 
 fn menu_popover(pal: &Palette) -> El {
-    let mut items = col().gap(2.0).w_full();
+    let mut items = col().w_full();
     for (label, action) in [("Open board…", 0u8), ("Export board…", 1)] {
         items = items.child(
             theme::menu_row(format!("menu-{action}"), label, pal)
@@ -400,7 +400,6 @@ fn menu_popover(pal: &Palette) -> El {
         .transition(Transition::scale(0.96))
         .absolute(12.0, 64.0)
         .w(228.0)
-        .padding(8.0)
         .child(items)
 }
 
@@ -424,13 +423,14 @@ fn tool_icon(tool: Tool, ink: Color) -> El {
 /// One drawing tool in the toolbar: name, key badge and tooltip.
 fn tool_item(s: &DoodleApp, pal: &Palette, tool: Tool, name: &str, key: &str) -> El {
     let selected = s.tool == tool;
-    let ink = if selected { pal.selected_ink } else { pal.text };
+    // coss pressed state keeps the primary ink; the translucent fill carries selection.
+    let ink = pal.text;
     theme::tool_button(format!("tool-{tool:?}"), selected, pal)
         .label(name)
         .help(name)
         .help_keys([key])
         .child(tool_icon(tool, ink))
-        .child(theme::key_badge(key, selected, pal))
+        .child(theme::key_badge(key, pal))
         .on_press(move |s: &mut DoodleApp| {
             dismiss_popovers(s);
             s.set_tool(tool);
@@ -440,14 +440,14 @@ fn tool_item(s: &DoodleApp, pal: &Palette, tool: Tool, name: &str, key: &str) ->
 fn toolbar_island(s: &DoodleApp, pal: &Palette) -> El {
     let mut bar = row().gap(4.0).items_center();
     let locked = s.toolbar_locked;
-    let lock_ink = if locked { pal.selected_ink } else { pal.text };
+    let lock_ink = pal.text;
     bar = bar.child(
         theme::tool_button("tool-Lock", locked, pal)
             .label("Lock toolbar")
             .help("Lock toolbar")
             .help_keys(["Q"])
             .child(icons::icon("lock", 16.0, lock_ink))
-            .child(theme::key_badge("Q", locked, pal))
+            .child(theme::key_badge("Q", pal))
             .on_press(|s: &mut DoodleApp| {
                 dismiss_popovers(s);
                 s.toolbar_locked = !s.toolbar_locked;
@@ -673,7 +673,8 @@ fn history_row(s: &DoodleApp, pal: &Palette) -> El {
 
 /// A 28×28 icon button for the bottom-left cluster.
 fn cluster_button(key: &str, label: &str, selected: bool, pal: &Palette, icon: &str) -> El {
-    let ink = if selected { pal.selected_ink } else { pal.text };
+    // coss pressed state keeps the primary ink; the translucent fill carries selection.
+    let ink = pal.text;
     theme::tool_button(key, selected, pal)
         .size(28.0, 28.0)
         .label(label)
@@ -775,7 +776,7 @@ fn notice_island(s: &DoodleApp, pal: &Palette) -> Option<El> {
 
 fn overflow_island(s: &DoodleApp, pal: &Palette) -> El {
     let open = s.overflow_open;
-    let ink = if open { pal.selected_ink } else { pal.text };
+    let ink = pal.text;
     let button = el()
         .key("overflow-toggle")
         .size(32.0, 32.0)
@@ -803,7 +804,7 @@ fn overflow_island(s: &DoodleApp, pal: &Palette) -> El {
 }
 
 fn overflow_popover(s: &DoodleApp, pal: &Palette) -> El {
-    let mut items = col().gap(2.0).w_full();
+    let mut items = col().w_full();
     for (label, key) in [
         ("Group", "group"),
         ("Ungroup", "ungroup"),
@@ -872,7 +873,6 @@ fn overflow_popover(s: &DoodleApp, pal: &Palette) -> El {
         .transition(Transition::scale(0.96))
         .pin(None, Some(64.0), Some(10.0), None)
         .w(200.0)
-        .padding(8.0)
         .child(items)
 }
 
@@ -1166,7 +1166,7 @@ fn settings_panel(s: &DoodleApp, pal: &Palette) -> El {
         .child(
             theme::flat_icon_button("settings-close", pal)
                 .label("Close settings")
-                .child(icons::icon("x", 16.0, pal.text))
+                .child(icons::icon("close", 16.0, pal.text))
                 .on_press(|s: &mut DoodleApp| s.show_settings = false),
         );
     body = col()
@@ -1213,7 +1213,7 @@ fn help_panel(s: &DoodleApp, pal: &Palette) -> El {
         .child(
             theme::flat_icon_button("help-close", pal)
                 .label("Close")
-                .child(icons::icon("x", 16.0, pal.text))
+                .child(icons::icon("close", 16.0, pal.text))
                 .on_press(|s: &mut DoodleApp| s.show_help = false),
         );
     let mut body = col()
