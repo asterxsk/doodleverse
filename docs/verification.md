@@ -325,4 +325,5 @@ Headless pass at 1180×760, dark default, evidence in `artifacts/round6/`.
 | Fast strokes no longer bead on straight runs (sub-millisecond samples hold the speed) | `cargo test -p doodle-canvas` (repeated-timestamp width stability) |
 | Opening the picker focuses its hex field with the value selected | manual pass pending |
 | Round-5 800% Bold/Extra rings unharmed | `artifacts/round5/loop.png`, `hizoom-bold.png` rerendered |
+| Zoom is capped at 300% (50% minimum unchanged) | `camera.rs` clamp test reads `MAX_ZOOM`; wheel beyond the cap stays at 3x |
 | Gate | fmt, clippy `-D warnings`, tests, release build all green |
