@@ -267,3 +267,12 @@ Headless pass at 1180×760, dark default, `artifacts/round2/`.
 | Slider thumb holds the 1.2 drag scale and reports 41% mid-drag | `drag.png` |
 | Tooltip uses the coss popover surface, radius 6, 12pt text, 0.98 fade | `tip.png` |
 | AI card surface uses the dialog radius 16 | `card.png` |
+
+## Critic pass 3 (fresh, 2026-11-19)
+
+Independent critic scored the current revision 92% with all seven must-haves met. Evidence it
+produced lives in `artifacts/critic3/`. The one compatibility flag was investigated: the
+untracked `scratch/ui/shapes.doodleverse` fixture fails postcard decode at the first object
+(`DeserializeBadBool`), i.e. its wire layout predates the current types; the two other Nov-16
+board files decode and validate, and the fill fields are EOF-tolerant, so this is not a
+regression from the shape-fill change. No further changes were made after the pass.

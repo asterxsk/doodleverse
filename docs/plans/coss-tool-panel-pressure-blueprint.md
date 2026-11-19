@@ -164,3 +164,20 @@ Component anatomy:
   `artifacts/round2/{ghost,ovopen,switch,drag,tip,card}.png`. Residual carried into the next
   pass: arrow/line panels still have no arrowhead-style controls, help remains a floating panel
   rather than a coss Dialog, and the filled icon set is bolder than Excalidraw's outline art.
+
+- Critic pass 3 (fresh, same brief): **92%**, seven of seven must-haves met — target reached, loop
+  stopped. Evidence: `artifacts/critic3/` (dark/light chrome, tool-sheet variants, fill grid,
+  export/reimport roundtrip, pressure slow/fast/off, switch motion frames, zoom crops, frame logs).
+  Confirmed working: tokens and radius scale on controls, tool-only top bar with Lock leading,
+  vertically-centred adaptive panel, all three fills on rectangle/diamond/ellipse with codec
+  roundtrip and legacy loads, speed-driven pressure with a constant-width off state, visible
+  hover/press/select states in both themes, Material icon set, smooth far zoom.
+  Residual gaps (deliberately not chased after the target was met): the Switch thumb snaps
+  between ends instead of visibly sliding, the large panels and help use the 8pt surface radius
+  rather than 16, Background colour does not tint hachure/cross-hatch lines (only solid fills),
+  Group/Ungroup render as enabled with no selection, the import notice says "Imported 1
+  objects", the minimap tooltip can clip the panel edge, the help body has no visible scroll
+  cue, and one untracked Nov-16 scratch board (`scratch/ui/shapes.doodleverse`, written by an
+  intermediate dev build) fails postcard decode while both other old boards load and validate.
+  Live OS cursors and dense-board zoom were verified by asset/wiring inspection and frame
+  timings rather than by capture or stress test.
