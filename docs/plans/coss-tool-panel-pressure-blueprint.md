@@ -140,8 +140,10 @@ Component anatomy:
   corrected to a rhombus, sliders/switch/toolbar rebuilt to the coss registry specs. Evidence:
   `artifacts/blueprint-coss/40-darkcentered.png`, `41-dark-taper.png`, `50-farzoom-aa*.png`,
   `51-mid/out/far*.png`, `53-toolbar-crop.png`, `54-panel-crop.png`.
-- Gate (final revision): fmt check clean, clippy `-D warnings` clean, 101 workspace tests
-  passed (1 ignored, the cursor regeneration), release build finished.
+- Gate (final revision): fmt check clean, clippy `-D warnings` clean, 96 workspace tests
+  passed (0 failed, 1 ignored — the cursor regeneration), release build finished. The earlier
+  101 figure counted the pre-round-2 test set and was not re-derived; this line is the measured
+  count for the current tree.
 - Critic pass 1 (fresh): 62%, five of seven must-haves. Confirmed gaps: `icon("x")` panic when
   opening Canvas settings or Shortcuts & about (light mode unreachable), filled-primary selected
   tool instead of coss's `bg-input/64` pressed wash, control radius 10 instead of 8, segmented
@@ -150,3 +152,15 @@ Component anatomy:
   segmented controls, menu `p-1`, stale `assets/icons/lucide` removed. Residual: arrow/line panels
   have no arrowhead-style controls, and help is a floating panel rather than a coss Dialog.
 - Critic passes: see below.
+
+- Critic pass 2 (fresh, same brief): 80%, six of seven must-haves. Confirmed gaps: tool-panel
+  content smeared during tool switches; overflow trigger became white-on-white while its menu
+  was open; the visible switch thumb swallowed its own press; the slider thumb did not hold the
+  1.2 drag scale; the tooltip used a bespoke surface rather than the coss popover tokens; the AI
+  card still used radius 10. Fixed: `.instant_changes()` under the panel's scale transition,
+  pressed wash on both menu triggers while open, `.hit()` removed from the switch thumb, a
+  `slider_drag` field driving the 1.2 scale through the drag, a `HelpLook` with popover
+  fill/border/radius/12pt/0.98 fade, and `RADIUS_DIALOG` on the card. Evidence:
+  `artifacts/round2/{ghost,ovopen,switch,drag,tip,card}.png`. Residual carried into the next
+  pass: arrow/line panels still have no arrowhead-style controls, help remains a floating panel
+  rather than a coss Dialog, and the filled icon set is bolder than Excalidraw's outline art.

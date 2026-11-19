@@ -225,6 +225,8 @@ pub struct DoodleApp {
     /// Stroke and fill opacity for the next drawing, 0..=1. Existing objects keep their own
     /// alpha, as with every other style control in this pass.
     pub opacity: f32,
+    /// The slider being dragged, so its thumb can hold coss's 1.2 drag scale until release.
+    pub slider_drag: Option<Target>,
     pub fill_rgba: [u8; 4],
     pub fill_style: FillStyle,
     /// Background colour for the next sticky note, and opacity for text ink.
@@ -310,6 +312,7 @@ impl DoodleApp {
             // Dark chrome is the default; light remains available from Canvas settings.
             color: [238, 234, 227, 255],
             opacity: 1.0,
+            slider_drag: None,
             fill_rgba: [0, 0, 0, 0],
             fill_style: FillStyle::default(),
             note_rgba: [255, 241, 186, 255],

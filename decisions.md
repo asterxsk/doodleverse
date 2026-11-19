@@ -608,3 +608,24 @@ authorized GitHub remote.
 - **Reversibility:** cheap — `theme.rs` holds every token and component constructor.
 - **Risk if wrong:** Rune's motion curve is not literally coss's CSS easing; it is the closest
   built-in spring, and reduced motion still disables it.
+
+### D48 — Small interaction details from the second critic pass
+- **Because:** a fresh critic scored the Build-record revision and named five gaps that read as
+  polish defects to a user: the tool panel smeared between tool switches, the overflow trigger
+  went white-on-white while its menu was open, the visible switch thumb swallowed clicks aimed at
+  it, the slider thumb only scaled on press but not while dragging, and the tooltip used a
+  bespoke dark box instead of the coss popover tokens.
+- **Decision:** the tool panel gets `.instant_changes()` (no cross-fade between two different
+  tool bodies) under its scale transition; the overflow and menu triggers keep the pressed wash
+  while open so the glyph stays legible; the switch thumb loses `.hit()` so the row's press
+  handler owns the gesture; the slider keeps a `slider_drag` target in app state and scales the
+  thumb 1.2 while it is held (`motion::SNAPPY`); `view()` installs a `HelpLook` with popover
+  fill, border ring, radius 6, 12pt text and 0.98 fade, matching coss Tooltip; the AI card uses
+  `RADIUS_DIALOG` 16.
+- **Alternatives:** swapping tool bodies on an identity key change (heavier state work for the
+  same result); a pressed-only thumb scale (the drag continues after press settles, so it
+  relaxed mid-gesture).
+- **Reversibility:** cheap — each is one attribute or one field.
+- **Risk if wrong:** `.instant_changes()` also suppresses the intended scale fade *within* one
+  tool's body changes (e.g. opacity value), which is acceptable because the panel's outer
+  transition still runs on show/hide.

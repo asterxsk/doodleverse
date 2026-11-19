@@ -74,8 +74,21 @@ fn dismiss_popovers(s: &mut DoodleApp) {
     s.overflow_open = false;
 }
 
-pub fn view(s: &DoodleApp, _cx: &mut Cx<DoodleApp>) -> El {
+pub fn view(s: &DoodleApp, cx: &mut Cx<DoodleApp>) -> El {
     let pal = theme::palette(s.light_theme);
+    // coss Tooltip: the popover surface, a hairline border, 12pt text, radius 6, and the
+    // popup's small scale-and-fade entrance.
+    cx.help_look(
+        rune::HelpLook::system(!s.light_theme)
+            .fill(pal.card)
+            .ink(pal.text)
+            .ring(1.0, pal.border)
+            .radius(theme::RADIUS_ITEM)
+            .padding(8.0, 5.0)
+            .font(rune::TextStyle::new(12.0, 400.0))
+            .gap(6.0)
+            .fade(0.12, 0.08, 0.98),
+    );
     let mut root = col()
         .key("root")
         .w_full()
@@ -318,9 +331,8 @@ fn menu_island(s: &DoodleApp, pal: &Palette) -> El {
         })
         .on_drag(|s: &mut DoodleApp, drag, _| s.popover_trigger_drag(drag));
     if s.menu_open {
-        // A subtle pressed fill keeps the label readable; the primary fill is reserved for the
-        // selected tool, whose icon and key badge swap to primary-foreground ink.
-        menu_button = menu_button.fill(pal.press);
+        // coss pressed state: the translucent input wash, with the label staying in reach.
+        menu_button = menu_button.fill(theme::pressed_fill(pal));
     }
     let mut content = row().gap(6.0).items_center().child(menu_button);
     // Narrow windows leave the centred toolbar room to pass between the two corner islands.
@@ -600,12 +612,15 @@ fn tool_settings_panel(s: &DoodleApp, pal: &Palette) -> El {
     );
     opacity = opacity.child(slider(
         pal,
-        "opacity",
-        "Opacity",
-        184.0,
-        s.slider_fraction(Target::Opacity),
-        Target::Opacity,
-        s.slider_value_text(Target::Opacity),
+        SliderSpec {
+            key: "opacity",
+            label: "Opacity",
+            width: 184.0,
+            fraction: s.slider_fraction(Target::Opacity),
+            target: Target::Opacity,
+            dragging: s.slider_drag == Some(Target::Opacity),
+            value_text: s.slider_value_text(Target::Opacity),
+        },
     ));
     body = body.child(opacity);
 
@@ -624,6 +639,9 @@ fn tool_settings_panel(s: &DoodleApp, pal: &Palette) -> El {
                 // coss popup motion: a small scale-up with the fade as the panel appears for a
                 // drawing tool and leaves for a navigation tool.
                 .transition(Transition::scale(0.98))
+                // Tool switches swap whole rows in the same commit; letting each label fade
+                // left ghosts of the old content under the new, so panel changes land at once.
+                .instant_changes()
                 .on_drawn_layout(|s: &mut DoodleApp, rect: [f32; 4]| {
                     s.tool_panel_layout = rect;
                 }),
@@ -780,14 +798,15 @@ fn overflow_island(s: &DoodleApp, pal: &Palette) -> El {
     let button = el()
         .key("overflow-toggle")
         .size(32.0, 32.0)
-        .radius(theme::RADIUS_SURFACE)
+        .radius(theme::RADIUS_CONTROL)
         .items_center()
         .justify_center()
         .fill(if open {
-            pal.selected_bg
+            theme::pressed_fill(pal)
         } else {
             Color::TRANSPARENT
         })
+        .hover(pal.hover)
         .press(pal.press)
         .label("More tools")
         .expanded(open)
@@ -887,15 +906,28 @@ fn zen_hint(pal: &Palette) -> El {
         )
 }
 
-fn slider(
-    pal: &Palette,
-    key: &str,
-    label: &str,
+/// Everything a slider needs beyond the palette, bundled so the builder stays under clippy's
+/// argument limit.
+struct SliderSpec<'a> {
+    key: &'a str,
+    label: &'a str,
     width: f32,
     fraction: f32,
     target: Target,
+    dragging: bool,
     value_text: String,
-) -> El {
+}
+
+fn slider(pal: &Palette, spec: SliderSpec<'_>) -> El {
+    let SliderSpec {
+        key,
+        label,
+        width,
+        fraction,
+        target,
+        dragging,
+        value_text,
+    } = spec;
     // coss slider: a 4pt `bg-input` track inset 2pt each side, a `bg-primary` indicator that
     // runs to the thumb centre, and a 16pt white thumb with an `input` (light) or `background`
     // (dark) border that scales to 1.2 while dragged.
@@ -919,8 +951,14 @@ fn slider(
         .h(20.0)
         .hit()
         .on_drag(move |s: &mut DoodleApp, drag, _| {
+            s.slider_drag = Some(target);
             if drag.w > 0.0 {
                 s.apply_slider(target, f64::from(drag.x / drag.w));
+            }
+        })
+        .on_drag_end(move |s: &mut DoodleApp, _, _| {
+            if s.slider_drag == Some(target) {
+                s.slider_drag = None;
             }
         })
         // A thin recessed track with a filled progress run and a raised knob; the old pill
@@ -947,7 +985,9 @@ fn slider(
                 .fill(theme::color([255, 255, 255, 255]))
                 .border(1.0, if pal.dark { pal.bg } else { pal.input })
                 .shadow(2.0, 5.0, pal.shadow)
-                .press_scale(1.2)
+                // coss `data-dragging:scale-120`; held for the whole drag, not just the press.
+                .scale(if dragging { 1.2 } else { 1.0 })
+                .scale_motion(motion::SNAPPY)
                 .motion(motion::SNAPPY)
                 .hit(),
         )
@@ -977,12 +1017,15 @@ fn slider_row(s: &DoodleApp, pal: &Palette, label: &str, key: &str, target: Targ
         )
         .child(slider(
             pal,
-            key,
-            label,
-            width,
-            s.slider_fraction(target),
-            target,
-            s.slider_value_text(target),
+            SliderSpec {
+                key,
+                label,
+                width,
+                fraction: s.slider_fraction(target),
+                target,
+                dragging: s.slider_drag == Some(target),
+                value_text: s.slider_value_text(target),
+            },
         ))
 }
 

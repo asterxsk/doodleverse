@@ -338,8 +338,7 @@ pub fn switch(key: impl Into<String>, on: bool, pal: &Palette) -> El {
                     color([255, 255, 255, 255])
                 })
                 .shadow(2.0, 4.0, pal.shadow)
-                .motion(motion::SNAPPY)
-                .hit(),
+                .motion(motion::SNAPPY),
         )
 }
 

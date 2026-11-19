@@ -254,3 +254,16 @@ for the icon glyphs.
 Gate for this pass: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets
 --locked -- -D warnings`, `cargo test --workspace --locked` (101 passed, 1 ignored — the cursor
 regeneration test), `cargo build --workspace --release --locked`.
+
+## Critic-round-2 fix pass (2026-11-19)
+
+Headless pass at 1180×760, dark default, `artifacts/round2/`.
+
+| Fix | Evidence |
+| --- | --- |
+| Tool panel no longer smears when switching Draw → Rectangle | `ghost.png` at 0.15 s after the click shows the rectangle body only |
+| Overflow trigger keeps its ink and pressed wash while the menu is open | `ovopen.png` |
+| Clicking the switch thumb's centre toggles Pressure off (row owns the press) | `switch.png` (off) and `card.png` (on) |
+| Slider thumb holds the 1.2 drag scale and reports 41% mid-drag | `drag.png` |
+| Tooltip uses the coss popover surface, radius 6, 12pt text, 0.98 fade | `tip.png` |
+| AI card surface uses the dialog radius 16 | `card.png` |

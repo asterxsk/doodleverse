@@ -231,7 +231,7 @@ pub fn card_views(s: &DoodleApp, pal: &Palette) -> Vec<El> {
             .w(CARD_WIDTH)
             .padding(12.0)
             .gap(8.0)
-            .radius(10.0)
+            .radius(theme::RADIUS_DIALOG)
             .fill(pal.card)
             .border(1.0, pal.border)
             .shadow(10.0, 28.0, pal.shadow);
