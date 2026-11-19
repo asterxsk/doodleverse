@@ -335,7 +335,6 @@ pub struct DoodleApp {
     pub show_close_confirm: bool,
     pub zen: bool,
     pub closing: bool,
-    pub reopen_pending: bool,
     pub menu_open: bool,
     pub overflow_open: bool,
     /// A press that dismissed a popover (or landed while one was open) must not also start a
@@ -425,7 +424,6 @@ impl DoodleApp {
             show_close_confirm: false,
             zen: false,
             closing: false,
-            reopen_pending: false,
             menu_open: false,
             overflow_open: false,
             suppress_board_press_until: None,
@@ -2094,15 +2092,6 @@ impl DoodleApp {
             }
         }
     }
-
-    pub fn reload_handle(&mut self) {
-        if self.reopen_pending {
-            self.reopen_pending = false;
-            if let Some(handle) = &self.handle {
-                handle.show();
-            }
-        }
-    }
 }
 
 /// Scale a colour's alpha by the opacity control. A transparent colour stays transparent.
@@ -2130,7 +2119,6 @@ pub fn on_modifiers(state: &mut DoodleApp, mods: Mods, _tx: &mut Tx) {
 
 pub fn poll(state: &mut DoodleApp, t: f64, tx: &mut Tx) -> bool {
     state.clock = t;
-    state.reload_handle();
     let refreshed = state.refresh();
     let cards = state.poll_cards(tx);
     let animating = state.any_card_busy()
@@ -2281,7 +2269,13 @@ pub fn on_close(state: &mut DoodleApp, tx: &mut Tx) {
     }
     state.cancel_gestures();
     state.show_close_confirm = true;
-    state.reopen_pending = true;
+    // Rune takes the window off screen before this hook runs and offers no way to veto the
+    // close, so the confirm has to bring the board back. Asking right here, in the close
+    // itself, keeps it to a single dropped frame; deferring to the next poll let the window
+    // sit closed in the taskbar until the user clicked it back open.
+    if let Some(handle) = &state.handle {
+        handle.open();
+    }
 }
 
 fn read_board_file(path: &Path) -> Result<doodle_files::ImportPayload, String> {

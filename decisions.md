@@ -682,3 +682,10 @@ authorized GitHub remote.
 - **Alternatives:** capping only the wheel handler (the zoom-to-fit and preset paths would still exceed it).
 - **Reversibility:** trivial — two constants.
 - **Risk if wrong:** boards larger than about two screens no longer fit at 50%; the minimap still covers navigation.
+
+### D52 — The unsaved-changes prompt returns the window at once
+- **Because:** clicking the title-bar close button made the app vanish, reappear as a taskbar icon, and only show "Discard changes?" after the user clicked that icon. Rune takes a closing window off screen before `App::on_close` runs and offers no hook to veto the close, so the confirm has to reopen the board; the old code deferred that reopen to the next poll tick, which is the gap the owner saw.
+- **Decision:** `on_close` calls `AppHandle::open()` itself when there are unsaved changes — inside the close event, before anything else runs — so the window comes back restoring and focused with the dialog already up. The deferred `reopen_pending`/`reload_handle` plumbing is gone. A clean board still quits straight from the hook.
+- **Alternatives:** subclassing the HWND on Windows to swallow `WM_CLOSE` (Rune exposes no window handle, and it would diverge per platform); auto-saving drafts so no prompt appears (a product change outside this fix).
+- **Reversibility:** cheap — one call and one deleted field.
+- **Risk if wrong:** a platform that ignores a reopen request inside the close hook would leave a taskbar icon again; the hook runs on every platform, so the risk is a visible flash rather than a lost prompt.
