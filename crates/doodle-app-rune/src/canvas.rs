@@ -298,24 +298,24 @@ fn draw_stroke(
     // A pen stroke that comes back to its own start encloses a region, and the pen's Background
     // swatch paints it, the way Excalidraw's freedraw does. The centreline is closed implicitly
     // by the fill, so only a stroke whose ends actually meet gets one; an open scribble keeps no
-    // background at all.
-    if fill_rgba[3] > 0 && *budget > 0 {
-        let (start, start_width) = points[0];
-        let (end, end_width) = points[points.len() - 1];
-        let gap = ((end[0] - start[0]).powi(2) + (end[1] - start[1]).powi(2)).sqrt();
-        if gap <= (start_width.max(end_width)).max(4.0) * 1.25 {
-            let polygon: Vec<[f32; 2]> = points.iter().map(|(at, _)| *at).collect();
-            *budget -= 1;
-            *shape = std::mem::take(shape).fill(polygon, s_color(fill_rgba));
-        }
+    // background at all. The same test closes the ink outline, so a loop has no cap bulges where
+    // its ends meet.
+    let (start, start_width) = points[0];
+    let (end, end_width) = points[points.len() - 1];
+    let gap = ((end[0] - start[0]).powi(2) + (end[1] - start[1]).powi(2)).sqrt();
+    let closed = gap <= (start_width.max(end_width)).max(4.0) * 1.25;
+    if fill_rgba[3] > 0 && closed && *budget > 0 {
+        let polygon: Vec<[f32; 2]> = points.iter().map(|(at, _)| *at).collect();
+        *budget -= 1;
+        *shape = std::mem::take(shape).fill(polygon, s_color(fill_rgba));
     }
     // Zoomed far out every measured width lands under one screen point. The ribbon outline then
     // paints a sub-pixel band whose edge staircase reads as pixelation. At that size the taper
     // is invisible anyway, so the stroke drops to one antialiased capsule polyline, the same
     // treatment a vector editor gives a scaled-down line; it fades smoothly instead of dithering.
     // The threshold also catches a thin fast stroke: below a couple of points the ribbon's
-    // antialiased chunk edges read as a dashed fringe along the line, while a plain stroked
-    // polyline stays a clean one-or-two-point line.
+    // antialiased edges read as a dashed fringe along the line, while a plain stroked polyline
+    // stays a clean one-or-two-point line.
     if points.iter().all(|(_, width)| *width < 1.6) {
         if *budget == 0 {
             return;
@@ -335,6 +335,7 @@ fn draw_stroke(
         if center.last() != Some(&last) {
             center.push(last);
         }
+        let center = simplify_polyline(&center, 0.12);
         if center.len() < 2 {
             return;
         }
@@ -344,48 +345,470 @@ fn draw_stroke(
         *shape = std::mem::take(shape).stroke(center, line, color);
         return;
     }
-    // Each run is one filled outline whose edges interpolate the measured widths. Stroking
-    // per-segment capsules quantized the width into half-point steps, and the overlapping round
-    // caps showed those steps as a dithered ladder along a speed taper. A single outline keeps
-    // the edge continuous. Sharp corners split the run so the outline never folds on itself.
-    let mut run_start = 0;
-    let mut previous_dir: Option<[f32; 2]> = None;
-    for index in 1..points.len() {
-        let (a, _) = points[index - 1];
-        let (b, _) = points[index];
-        let Some(dir) = normalized_direction(a, b) else {
-            continue;
-        };
-        let sharp = previous_dir.is_some_and(|prev| prev[0] * dir[0] + prev[1] * dir[1] < 0.25);
-        if sharp {
-            emit_stroke_run(
-                shape,
-                &points[run_start..index],
-                color,
-                width,
-                height,
-                budget,
-            );
-            // The split leaves two flat ends at the joint; one disc covers both.
-            if *budget > 0 {
-                *budget -= 1;
-                fill_disc(shape, points[index - 1].0, points[index - 1].1, color);
-            }
-            run_start = index - 1;
-        }
-        previous_dir = Some(dir);
+    // One filled outline per stroke, built the way perfect-freehand builds a freedraw outline:
+    // a streamline-smoothed centreline, a per-point radius, round caps and corner caps. The
+    // outline carries the widths already resolved by the brush, so the slow plateau and the
+    // taper survive without a second pressure pass. A very short stroke has no room for the
+    // outline's caps, so it stays a capsule.
+    let outlines = stroke_outline(&points, closed);
+    let vertices: usize = outlines.iter().map(Vec::len).sum();
+    if outlines.is_empty() || vertices < 3 {
         if *budget == 0 {
             return;
         }
+        let line = points
+            .iter()
+            .map(|(_, width)| *width)
+            .fold(0.0_f32, f32::max)
+            .max(1.0);
+        let mut center: Vec<[f32; 2]> = Vec::with_capacity(points.len());
+        for (at, _) in &points {
+            if center.last() != Some(at) {
+                center.push(*at);
+            }
+        }
+        if center.len() < 2 {
+            return;
+        }
+        *budget -= 1;
+        *shape = std::mem::take(shape).stroke(center, line, color);
+        return;
     }
-    emit_stroke_run(shape, &points[run_start..], color, width, height, budget);
+    let margin = points.iter().map(|(_, w)| *w).fold(0.0, f32::max) + 64.0;
+    if !points
+        .iter()
+        .any(|(at, _)| visible(*at, width, height, margin))
+    {
+        return;
+    }
+    for outline in outlines {
+        if *budget == 0 {
+            return;
+        }
+        *budget -= 1;
+        *shape = std::mem::take(shape).fill(outline, color);
+    }
 }
 
-fn normalized_direction(a: [f32; 2], b: [f32; 2]) -> Option<[f32; 2]> {
-    let dx = b[0] - a[0];
-    let dy = b[1] - a[1];
-    let length = (dx * dx + dy * dy).sqrt();
-    (length > 0.000_1).then(|| [dx / length, dy / length])
+/// perfect-freehand's constants (`src/constants.ts`), in screen points.
+const MIN_RADIUS: f32 = 0.01;
+/// Points this close to the end are noise and would wobble the end cap.
+const END_NOISE_THRESHOLD: f32 = 3.0;
+/// Arc resolution for the two round caps. The start cap matches perfect-freehand's 13; the end
+/// uses one more to stay smooth on a wide stroke without tripling the vertex count the way the
+/// original 1.5-turn end cap does (that polygon crosses itself, which this renderer's ear
+/// clipper cannot fill).
+const START_CAP_SEGMENTS: usize = 13;
+const END_CAP_SEGMENTS: usize = 14;
+/// Arc resolution for the cap drawn at a cusp.
+const CORNER_CAP_SEGMENTS: usize = 13;
+
+/// A centreline point in perfect-freehand's shape: `vector` points back along the line toward
+/// the previous point, and `running` is the distance travelled so far.
+struct OutlineSourcePoint {
+    at: [f32; 2],
+    vector: [f32; 2],
+    running: f32,
+    width: f32,
+}
+
+fn dot(a: [f32; 2], b: [f32; 2]) -> f32 {
+    a[0] * b[0] + a[1] * b[1]
+}
+
+/// perfect-freehand's `per`: a quarter turn that leaves the two sides in a consistent order.
+fn per(a: [f32; 2]) -> [f32; 2] {
+    [a[1], -a[0]]
+}
+
+fn lerp(a: [f32; 2], b: [f32; 2], t: f32) -> [f32; 2] {
+    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+}
+
+fn rotate_around(point: [f32; 2], center: [f32; 2], angle: f32) -> [f32; 2] {
+    let (sin, cos) = angle.sin_cos();
+    let (x, y) = (point[0] - center[0], point[1] - center[1]);
+    [x * cos - y * sin + center[0], x * sin + y * cos + center[1]]
+}
+
+/// The centreline points with their back-facing unit vectors and running lengths, as
+/// perfect-freehand's `getStrokePoints` produces them. The streamline interpolation itself
+/// lives in the brush: the stored geometry already carries the smoothed positions, because it
+/// is also where each point's width is resolved.
+fn outline_source_points(points: &[([f32; 2], f32)]) -> Vec<OutlineSourcePoint> {
+    let mut out: Vec<OutlineSourcePoint> = Vec::with_capacity(points.len());
+    let (first, first_width) = points[0];
+    out.push(OutlineSourcePoint {
+        at: first,
+        vector: [1.0, 1.0],
+        running: 0.0,
+        width: first_width,
+    });
+    for (at, width) in &points[1..] {
+        let previous = out.last().expect("seeded with the first point");
+        let dx = at[0] - previous.at[0];
+        let dy = at[1] - previous.at[1];
+        let distance = (dx * dx + dy * dy).sqrt();
+        if distance <= 1e-5 {
+            continue;
+        }
+        out.push(OutlineSourcePoint {
+            at: *at,
+            // Back toward the previous point, the direction perfect-freehand stores.
+            vector: [-dx / distance, -dy / distance],
+            running: previous.running + distance,
+            width: *width,
+        });
+    }
+    if out.len() > 1 {
+        out[0].vector = out[1].vector;
+    }
+    // At 800% one screen point of hand jitter is a steep direction change relative to the
+    // stroke's width, and the two offsets inherit it as a notch in the edge. A 1-2-1 tap over
+    // the unit vectors removes that high-frequency wobble; the builder's streamline already
+    // handles the low-frequency path, so the outline keeps its shape.
+    let raw: Vec<[f32; 2]> = out.iter().map(|point| point.vector).collect();
+    for (index, point) in out.iter_mut().enumerate() {
+        let mut x = 0.0;
+        let mut y = 0.0;
+        for (offset, tap) in [(-1i32, 1.0_f32), (0, 2.0), (1, 1.0)] {
+            let at = index as i32 + offset;
+            if (0..raw.len() as i32).contains(&at) {
+                x += raw[at as usize][0] * tap;
+                y += raw[at as usize][1] * tap;
+            }
+        }
+        let length = (x * x + y * y).sqrt();
+        if length > 1e-4 {
+            point.vector = [x / length, y / length];
+        }
+    }
+    // The brush's width follows the speed with a short lag, so the first few points ramp from
+    // the starting pressure to the stroke's weight. Offsetting by the raw values puts a 6pt
+    // ledge where the round start cap meets the band. A 1-2-3-2-1 tap keeps the taper and the
+    // plateau but makes the edges continuous.
+    let widths: Vec<f32> = out.iter().map(|point| point.width).collect();
+    for (index, point) in out.iter_mut().enumerate() {
+        let mut sum = 0.0;
+        let mut weight = 0.0;
+        for (offset, tap) in [(-2i32, 1.0_f32), (-1, 2.0), (0, 3.0), (1, 2.0), (2, 1.0)] {
+            let at = index as i32 + offset;
+            if (0..widths.len() as i32).contains(&at) {
+                sum += widths[at as usize] * tap;
+                weight += tap;
+            }
+        }
+        point.width = sum / weight;
+    }
+    out
+}
+
+/// The outline of a stroke, in perfect-freehand's winding order: left side from start to end,
+/// round end cap, right side back, round start cap. A closed stroke (a pen loop) joins the two
+/// sides without caps, because two caps meeting at the same point would bulge, and comes back as
+/// overlapping plain strips (see `closed_band_sections`).
+fn stroke_outline(points: &[([f32; 2], f32)], closed: bool) -> Vec<Vec<[f32; 2]>> {
+    let path = outline_source_points(points);
+    if path.len() < 2 {
+        return Vec::new();
+    }
+    let total = path[path.len() - 1].running;
+    let mut left: Vec<[f32; 2]> = Vec::with_capacity(path.len());
+    let mut right: Vec<[f32; 2]> = Vec::with_capacity(path.len());
+    let mut previous_vector = path[0].vector;
+    let mut previous_left = path[0].at;
+    let mut previous_right = path[0].at;
+    let mut previous_was_sharp = false;
+
+    for index in 0..path.len() {
+        let point = &path[index];
+        let is_last = index + 1 == path.len();
+        // perfect-freehand's end-noise skip. A closed outline keeps its final points, since the
+        // join needs them to meet the start.
+        if !is_last && !closed && total - point.running < END_NOISE_THRESHOLD {
+            continue;
+        }
+        let radius = (point.width * 0.5).max(MIN_RADIUS);
+        let next_vector = if is_last {
+            point.vector
+        } else {
+            path[index + 1].vector
+        };
+        let next_dpr = if is_last {
+            1.0
+        } else {
+            dot(point.vector, next_vector)
+        };
+        let previous_dpr = dot(point.vector, previous_vector);
+        let sharp = (previous_dpr < 0.0 && !previous_was_sharp) || (!is_last && next_dpr < 0.0);
+        if sharp {
+            // A cusp gets its own rounded cap, so the polygon turns there instead of folding the
+            // two offset chains through each other.
+            let offset = [
+                per(previous_vector)[0] * radius,
+                per(previous_vector)[1] * radius,
+            ];
+            let mut cap_left = point.at;
+            let mut cap_right = point.at;
+            for step in 0..=CORNER_CAP_SEGMENTS {
+                let angle = std::f32::consts::PI * step as f32 / CORNER_CAP_SEGMENTS as f32;
+                cap_left = rotate_around(
+                    [point.at[0] - offset[0], point.at[1] - offset[1]],
+                    point.at,
+                    angle,
+                );
+                cap_right = rotate_around(
+                    [point.at[0] + offset[0], point.at[1] + offset[1]],
+                    point.at,
+                    -angle,
+                );
+                left.push(cap_left);
+                right.push(cap_right);
+            }
+            previous_left = cap_left;
+            previous_right = cap_right;
+            if !is_last && next_dpr < 0.0 {
+                previous_was_sharp = true;
+            }
+            continue;
+        }
+        previous_was_sharp = false;
+        if is_last {
+            let offset = [per(point.vector)[0] * radius, per(point.vector)[1] * radius];
+            left.push([point.at[0] - offset[0], point.at[1] - offset[1]]);
+            right.push([point.at[0] + offset[0], point.at[1] + offset[1]]);
+            continue;
+        }
+        // The offset direction is the normal of the vector blended between this point and the
+        // next one by their dot product, so a bend splits the angle between the two segments.
+        // The last band step is the exception: its normal is taken from the final point, so the
+        // band arrives at the end cap perpendicular to the cap's radius. Blending there made the
+        // band edge and the arc leave each other at a small angle, which showed as a notch where
+        // the cap meets the straight side.
+        let direction = if !closed && index + 2 == path.len() {
+            per(next_vector)
+        } else {
+            per(lerp(next_vector, point.vector, next_dpr))
+        };
+        let offset = [direction[0] * radius, direction[1] * radius];
+        let next_left = [point.at[0] - offset[0], point.at[1] - offset[1]];
+        let next_right = [point.at[0] + offset[0], point.at[1] + offset[1]];
+        // perfect-freehand's minimum-distance rule: a vertex is kept only once it has moved far
+        // enough from the last saved one (half the stroke width, floored so thin strokes do not
+        // explode the polygon, capped so a fat stroke at 800% still follows a loop's curve: with
+        // a larger step the chords across a pen circle read as facets). This is what keeps the
+        // outline's vertex count proportional to its length instead of to the sample rate. Both
+        // sides save together: a closed loop's sections pair left and right by index, and
+        // independent decimation let the two sides drift apart, which twisted the section cuts
+        // into a wedge.
+        let spacing = (point.width * 0.5).clamp(3.0, 12.0);
+        let min_distance = spacing * spacing;
+        let moved = |a: [f32; 2], b: [f32; 2]| {
+            let (dx, dy) = (a[0] - b[0], a[1] - b[1]);
+            dx * dx + dy * dy > min_distance
+        };
+        if index == 0 || moved(previous_left, next_left) || moved(previous_right, next_right) {
+            left.push(next_left);
+            right.push(next_right);
+            previous_left = next_left;
+            previous_right = next_right;
+        }
+        previous_vector = point.vector;
+    }
+
+    // A straight edge made of many vertices gets a dotted antialiased fringe from the per-edge
+    // rasterisation, and each extra vertex costs the ear clipper. Dropping the vertices that the
+    // line between their neighbours already covers leaves the two long edges of a straight
+    // stroke as single segments without moving the edge by a tenth of a point. A closed loop
+    // keeps both chains whole: its sections pair them by index, and simplifying each side
+    // separately would let their vertices diverge.
+    if closed {
+        return closed_band_sections(&left, &right);
+    }
+    let left = simplify_polyline(&left, 0.08);
+    let right = simplify_polyline(&right, 0.08);
+    let mut outline = Vec::with_capacity(left.len() + right.len() + 32);
+    let first = path[0].at;
+    let last = path[path.len() - 1].at;
+    let (Some(&first_left), Some(&first_right)) = (left.first(), right.first()) else {
+        return Vec::new();
+    };
+    let (Some(&last_left), Some(&last_right)) = (left.last(), right.last()) else {
+        return Vec::new();
+    };
+    outline.extend_from_slice(&left);
+    // Round end cap, from the last left vertex to the last right vertex around the final
+    // centre. perfect-freehand sweeps a fixed 1.5 turns so it stays capped after a sharp end
+    // turn, but that boundary crosses itself; this renderer's ear clipper needs a simple
+    // polygon. Building the arc between the two real chain ends instead keeps the joins exact,
+    // and choosing the sweep that bulges outward gives the same half turn on a normal ending.
+    let forward = [
+        -path[path.len() - 1].vector[0],
+        -path[path.len() - 1].vector[1],
+    ];
+    outline.extend(cap_arc(
+        last_left,
+        last_right,
+        last,
+        forward,
+        END_CAP_SEGMENTS,
+    ));
+    outline.extend(right.iter().rev());
+    let backward = path[0].vector;
+    outline.extend(cap_arc(
+        first_right,
+        first_left,
+        first,
+        backward,
+        START_CAP_SEGMENTS,
+    ));
+    vec![outline]
+}
+
+/// Split a closed band into plain overlapping strips. A full turn wrapped into one polygon has to
+/// traverse the closing cut twice, which leaves coincident vertices where the ear clipper can see
+/// no ear and falls back to a fan that fills the whole loop. Each strip here is an ordinary band;
+/// neighbouring strips start several vertices before the previous cut, so every antialiased cut
+/// lands on the opaque interior of a later strip and disappears. The last strip runs past the
+/// chain's end into the first vertices: that wrap draws the short bridge between the stroke's
+/// lagged end and its start, so the loop has no seam.
+fn closed_band_sections(left: &[[f32; 2]], right: &[[f32; 2]]) -> Vec<Vec<[f32; 2]>> {
+    const SECTION: usize = 36;
+    const OVERLAP: usize = 4;
+    let length = left.len().min(right.len());
+    if length < 3 {
+        return Vec::new();
+    }
+    if length <= 2 * OVERLAP + 2 {
+        let mut polygon = Vec::with_capacity(length * 2);
+        polygon.extend_from_slice(&left[..length]);
+        polygon.extend(right[..length].iter().rev());
+        return vec![polygon];
+    }
+    let mut ranges = Vec::new();
+    if length <= SECTION + OVERLAP {
+        // Two half turns: the second one wraps past the end, so the seam and both cuts sit
+        // inside strips and the bridge is drawn without any repeated vertex.
+        let half = length / 2;
+        ranges.push((0, half + OVERLAP));
+        ranges.push((half, length + OVERLAP));
+    } else {
+        let mut start = 0;
+        loop {
+            let end = (start + SECTION).min(length + OVERLAP);
+            ranges.push((start, end));
+            if end == length + OVERLAP {
+                break;
+            }
+            start = end - OVERLAP;
+        }
+    }
+    ranges
+        .into_iter()
+        .map(|(start, end)| {
+            let mut polygon = Vec::with_capacity((end - start + 1) * 2);
+            for position in start..=end {
+                polygon.push(left[position % length]);
+            }
+            for position in (start..=end).rev() {
+                polygon.push(right[position % length]);
+            }
+            polygon
+        })
+        .collect()
+}
+
+/// Ramer-Douglas-Peucker, with the tolerance in screen points. A straight run collapses to its
+/// two ends; a curve keeps the vertices needed to stay within the tolerance.
+fn simplify_polyline(points: &[[f32; 2]], tolerance: f32) -> Vec<[f32; 2]> {
+    if points.len() <= 2 {
+        return points.to_vec();
+    }
+    let last = points.len() - 1;
+    let mut keep = vec![false; points.len()];
+    keep[0] = true;
+    keep[last] = true;
+    let tolerance_squared = tolerance * tolerance;
+    let distance_squared = |point: [f32; 2], a: [f32; 2], b: [f32; 2]| {
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let length_squared = dx * dx + dy * dy;
+        if length_squared <= 1e-9 {
+            let (px, py) = (point[0] - a[0], point[1] - a[1]);
+            return px * px + py * py;
+        }
+        let t =
+            (((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / length_squared).clamp(0.0, 1.0);
+        let (px, py) = (point[0] - (a[0] + dx * t), point[1] - (a[1] + dy * t));
+        px * px + py * py
+    };
+    let mut stack = vec![(0usize, last)];
+    while let Some((start, end)) = stack.pop() {
+        let mut farthest = 0.0_f32;
+        let mut split = None;
+        for index in start + 1..end {
+            let distance = distance_squared(points[index], points[start], points[end]);
+            if distance > farthest {
+                farthest = distance;
+                split = Some(index);
+            }
+        }
+        if let Some(index) = split
+            && farthest > tolerance_squared
+        {
+            keep[index] = true;
+            stack.push((start, index));
+            stack.push((index, end));
+        }
+    }
+    points
+        .iter()
+        .zip(keep)
+        .filter_map(|(point, keep)| keep.then_some(*point))
+        .collect()
+}
+
+/// The inside vertices of a round cap arc from `from` to `to` around `center`, bulging toward
+/// `outward`. Both endpoints already sit on their side's chain, so the arc excludes them; the
+/// radius is interpolated between the two because a decimated side may save a vertex from an
+/// earlier point than the cap's centre.
+fn cap_arc(
+    from: [f32; 2],
+    to: [f32; 2],
+    center: [f32; 2],
+    outward: [f32; 2],
+    segments: usize,
+) -> Vec<[f32; 2]> {
+    let angle_of = |at: [f32; 2]| (at[1] - center[1]).atan2(at[0] - center[0]);
+    let start_angle = angle_of(from);
+    let mut sweep = (angle_of(to) - start_angle).rem_euclid(std::f32::consts::TAU);
+    // Of the two ways round, take the one whose middle faces away from the stroke. The usual
+    // case is a half turn and this only matters when the end vector is not perpendicular.
+    let faces_out = |sweep: f32| {
+        let middle = start_angle + sweep * 0.5;
+        middle.cos() * outward[0] + middle.sin() * outward[1]
+    };
+    if faces_out(sweep - std::f32::consts::TAU) > faces_out(sweep) {
+        sweep -= std::f32::consts::TAU;
+    }
+    let start_radius = {
+        let (dx, dy) = (from[0] - center[0], from[1] - center[1]);
+        (dx * dx + dy * dy).sqrt()
+    };
+    let end_radius = {
+        let (dx, dy) = (to[0] - center[0], to[1] - center[1]);
+        (dx * dx + dy * dy).sqrt()
+    };
+    (1..segments)
+        .map(|step| {
+            let t = step as f32 / segments as f32;
+            let angle = start_angle + sweep * t;
+            let radius = start_radius + (end_radius - start_radius) * t;
+            [
+                center[0] + angle.cos() * radius,
+                center[1] + angle.sin() * radius,
+            ]
+        })
+        .collect()
 }
 
 fn fill_disc(shape: &mut Shape, center: [f32; 2], width: f32, color: Color) {
@@ -404,130 +827,6 @@ fn fill_disc(shape: &mut Shape, center: [f32; 2], width: f32, color: Color) {
         };
     }
     *shape = std::mem::take(shape).fill_path(&path.close(), color);
-}
-
-fn emit_stroke_run(
-    shape: &mut Shape,
-    points: &[([f32; 2], f32)],
-    color: Color,
-    width: f32,
-    height: f32,
-    budget: &mut usize,
-) {
-    if points.len() < 2 || *budget < 3 {
-        return;
-    }
-    let margin = points.iter().map(|(_, w)| *w).fold(0.0, f32::max) + 64.0;
-    if !points
-        .iter()
-        .any(|(at, _)| visible(*at, width, height, margin))
-    {
-        return;
-    }
-    let last = points.len() - 1;
-    let (left, right, band) = offset_chains(points);
-    // The band is filled as short chained runs rather than one outline polygon. A single outline
-    // over a long stroke is one ear-clipped polygon with a thousand nearly collinear vertices,
-    // and the triangulation there leaves visible lobes along the edge. A 32-point run is small
-    // enough to triangulate cleanly. Neighbouring runs overlap by one point so the antialiased
-    // end cap of one run sits under the opaque interior of the next instead of showing as a hair
-    // line; a full disc at the joint would instead poke out wherever a raw sample width exceeds
-    // the smoothed band.
-    const RUN: usize = 32;
-    const OVERLAP: usize = 1;
-    let mut run_start = 0;
-    while run_start < last {
-        if *budget == 0 {
-            return;
-        }
-        let run_end = (run_start + RUN).min(last);
-        let mut polygon: Vec<[f32; 2]> = Vec::with_capacity((run_end - run_start + 1) * 2);
-        polygon.extend_from_slice(&left[run_start..=run_end]);
-        for index in (run_start..=run_end).rev() {
-            polygon.push(right[index]);
-        }
-        *budget -= 1;
-        *shape = std::mem::take(shape).fill(polygon, color);
-        run_start = if run_end == last {
-            last
-        } else {
-            run_end - OVERLAP
-        };
-    }
-    // The start gets a round cap from the smoothed band width. The end is left as the band's own
-    // cut: a disc there read as an ink blot oozing past the last sample, and the short end taper
-    // already closes the stroke instead of chopping it square.
-    fill_disc(shape, points[0].0, band[0], color);
-}
-
-/// The two offset chains of a stroke run: each point pushed out along the smoothed normal by
-/// half the smoothed width. Raw accepted samples carry speed noise, and a width change of half a
-/// point every two screen points put a visible notch in the edge of a wide stroke; the same holds
-/// for the normals where central differences meet. Triangular taps keep the taper and the curve
-/// without the high-frequency wobble.
-fn offset_chains(points: &[([f32; 2], f32)]) -> (Vec<[f32; 2]>, Vec<[f32; 2]>, Vec<f32>) {
-    let last = points.len() - 1;
-    let smoothed_width = |index: usize| -> f32 {
-        let mut sum = 0.0;
-        let mut weight = 0.0;
-        for (offset, tap) in [(-2i32, 1.0_f32), (-1, 2.0), (0, 3.0), (1, 2.0), (2, 1.0)] {
-            let at = index as i32 + offset;
-            if (0..=last as i32).contains(&at) {
-                sum += points[at as usize].1 * tap;
-                weight += tap;
-            }
-        }
-        sum / weight
-    };
-    let raw_tangent = |index: usize| -> Option<[f32; 2]> {
-        if index == 0 {
-            normalized_direction(points[0].0, points[1].0)
-        } else if index == last {
-            normalized_direction(points[last - 1].0, points[last].0)
-        } else {
-            normalized_direction(points[index - 1].0, points[index + 1].0)
-                .or_else(|| normalized_direction(points[index - 1].0, points[index].0))
-        }
-    };
-    let mut tangents: Vec<[f32; 2]> = Vec::with_capacity(points.len());
-    for index in 0..points.len() {
-        tangents.push(raw_tangent(index).unwrap_or([1.0, 0.0]));
-    }
-    let smoothed: Vec<[f32; 2]> = (0..tangents.len())
-        .map(|index| {
-            let mut x = 0.0;
-            let mut y = 0.0;
-            for (offset, tap) in [(-1i32, 1.0_f32), (0, 2.0), (1, 1.0)] {
-                let at = index as i32 + offset;
-                if (0..tangents.len() as i32).contains(&at) {
-                    x += tangents[at as usize][0] * tap;
-                    y += tangents[at as usize][1] * tap;
-                }
-            }
-            let length = (x * x + y * y).sqrt();
-            if length > 0.000_1 {
-                [x / length, y / length]
-            } else {
-                tangents[index]
-            }
-        })
-        .collect();
-    let mut left: Vec<[f32; 2]> = Vec::with_capacity(points.len());
-    let mut right: Vec<[f32; 2]> = Vec::with_capacity(points.len());
-    let mut band: Vec<f32> = Vec::with_capacity(points.len());
-    let mut direction = smoothed[0];
-    for (index, (at, _)) in points.iter().enumerate() {
-        if index != 0 {
-            direction = smoothed[index];
-        }
-        let normal = [-direction[1], direction[0]];
-        let width = smoothed_width(index).max(0.5);
-        let half = width * 0.5;
-        band.push(width);
-        left.push([at[0] + normal[0] * half, at[1] + normal[1] * half]);
-        right.push([at[0] - normal[0] * half, at[1] - normal[1] * half]);
-    }
-    (left, right, band)
 }
 
 fn draw_shape(
@@ -1362,26 +1661,32 @@ mod tests {
     #[test]
     fn a_circle_outline_keeps_a_constant_radius() {
         // A 45pt-radius circle sampled every 3pt with a constant 32pt width: every outline
-        // point must sit near radius 45 +/- 16. A notch or lobe here is what reads as a lumpy,
-        // mayonnaise-like stroke edge on a wide pen.
-        let points: Vec<([f32; 2], f32)> = (0..150)
+        // vertex must sit on the 29pt inner or 61pt outer edge, or on a cap arc between them.
+        // A notch or lobe here is what reads as a lumpy stroke edge on a wide pen.
+        let points: Vec<([f32; 2], f32)> = (0..=150)
             .map(|index| {
                 let angle = std::f32::consts::TAU * index as f32 / 150.0;
                 ([45.0 * angle.cos(), 45.0 * angle.sin()], 32.0)
             })
             .collect();
-        let (left, right, band) = offset_chains(&points);
+        let sections = stroke_outline(&points, true);
+        // A long loop is split into band sections so the ear clipper never sees the wrapped
+        // ring; at this width the circle is short enough to stay one section.
+        assert!(!sections.is_empty());
+        assert!(
+            sections.iter().all(|section| section.len() < 100),
+            "a loop section kept too many vertices"
+        );
+        let outline: Vec<[f32; 2]> = sections.iter().flatten().copied().collect();
+        assert!(
+            outline.len() >= 20,
+            "outline collapsed to {}",
+            outline.len()
+        );
         let radius = |at: [f32; 2]| (at[0] * at[0] + at[1] * at[1]).sqrt();
-        // The two chains are the inner and outer edge; which one `left` is depends on the
-        // winding, so the test checks the pair of radii rather than a side.
-        let outer = left
+        let outer = outline.iter().map(|at| radius(*at)).fold(0.0_f32, f32::max);
+        let inner = outline
             .iter()
-            .chain(right.iter())
-            .map(|at| radius(*at))
-            .fold(0.0_f32, f32::max);
-        let inner = left
-            .iter()
-            .chain(right.iter())
             .map(|at| radius(*at))
             .fold(f32::MAX, f32::min);
         assert!(
@@ -1392,8 +1697,105 @@ mod tests {
             (inner - 29.0).abs() < 1.0,
             "inner radius drifted to {inner}"
         );
-        for width in band {
-            assert!((width - 32.0).abs() < 1.0, "band width drifted to {width}");
+        // Every vertex is on one of the two edges or inside the band; none may fold past the
+        // centreline, which is what a fan triangulation of a crossed outline produced.
+        for at in &outline {
+            let r = radius(*at);
+            assert!(
+                (29.0..=61.0).contains(&r),
+                "outline vertex at radius {r} left the band"
+            );
+        }
+    }
+
+    #[test]
+    fn a_long_closed_loop_is_split_into_overlapping_strips() {
+        // The clipper cannot fill a wrapped annulus: the closing cut repeats two vertices, every
+        // ear test then fails and the fallback fan fills the hole. A long loop must therefore
+        // arrive as several ordinary strips, each reaching far enough into the next one that its
+        // antialiased cut lands on opaque ink. These chains stand in for a decimated loop: the
+        // x coordinate encodes the chain position, so a strip's forward half is easy to read
+        // back.
+        let left: Vec<[f32; 2]> = (0..200).map(|index| [index as f32, 0.0]).collect();
+        let right: Vec<[f32; 2]> = (0..200).map(|index| [index as f32, 1.0]).collect();
+        let strips = closed_band_sections(&left, &right);
+        assert!(strips.len() > 1, "a 200-vertex loop stayed one polygon");
+
+        let mut runs: Vec<Vec<usize>> = Vec::new();
+        for strip in &strips {
+            let unique = strip
+                .iter()
+                .map(|at| (at[0] as usize, at[1] as u8))
+                .collect::<std::collections::HashSet<_>>();
+            assert_eq!(unique.len(), strip.len(), "a strip repeated a vertex");
+            let forward: Vec<usize> = strip
+                .iter()
+                .take_while(|at| at[1] == 0.0)
+                .map(|at| at[0] as usize)
+                .collect();
+            assert!(forward.len() > 1, "a strip carried no forward edge");
+            for pair in forward.windows(2) {
+                assert_eq!(
+                    pair[1],
+                    (pair[0] + 1) % 200,
+                    "a strip jumped along the chain: {pair:?}"
+                );
+            }
+            runs.push(forward);
+        }
+        // Every chain position is drawn, and each cut (a strip start) is covered by the strip
+        // before it.
+        let mut covered = [false; 200];
+        for run in &runs {
+            for position in run {
+                covered[*position] = true;
+            }
+        }
+        assert!(
+            covered.iter().all(|seen| *seen),
+            "a loop position was left out"
+        );
+        for pair in runs.windows(2) {
+            let (previous, next) = (&pair[0], &pair[1]);
+            assert!(
+                next[0] >= previous[0] && next[0] < previous[0] + previous.len(),
+                "strip starting at {} left its cut outside the previous strip",
+                next[0]
+            );
+        }
+    }
+
+    #[test]
+    fn a_straight_stroke_outline_is_two_edges_and_round_caps() {
+        let points: Vec<([f32; 2], f32)> =
+            (0..=100).map(|index| ([index as f32, 0.0], 10.0)).collect();
+        let outlines = stroke_outline(&points, false);
+        assert_eq!(outlines.len(), 1, "an open stroke is one polygon");
+        let outline = &outlines[0];
+        let min_x = outline.iter().map(|at| at[0]).fold(f32::MAX, f32::min);
+        let max_x = outline.iter().map(|at| at[0]).fold(f32::MIN, f32::max);
+        let min_y = outline.iter().map(|at| at[1]).fold(f32::MAX, f32::min);
+        let max_y = outline.iter().map(|at| at[1]).fold(f32::MIN, f32::max);
+        assert!((min_x + 5.0).abs() < 0.6, "left cap at {min_x}");
+        assert!((max_x - 105.0).abs() < 0.6, "right cap at {max_x}");
+        assert!((min_y + 5.0).abs() < 0.6, "top edge at {min_y}");
+        assert!((max_y - 5.0).abs() < 0.6, "bottom edge at {max_y}");
+        for at in outline {
+            assert!(
+                (-5.6..=5.6).contains(&at[1]),
+                "outline vertex off the straight band: {at:?}"
+            );
+        }
+        // Each side is a straight run of vertices covering the line, not a single point.
+        for edge in [-5.0_f32, 5.0] {
+            let spans: Vec<f32> = outline
+                .iter()
+                .filter(|at| (at[1] - edge).abs() < 0.6)
+                .map(|at| at[0])
+                .collect();
+            let low = spans.iter().copied().fold(f32::MAX, f32::min);
+            let high = spans.iter().copied().fold(f32::MIN, f32::max);
+            assert!(high - low > 90.0, "edge at {edge} spans only {low}..{high}");
         }
     }
 }

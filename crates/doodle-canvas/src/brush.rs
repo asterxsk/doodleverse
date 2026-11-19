@@ -19,8 +19,11 @@ impl Default for BrushSettings {
             base_width: 2.0,
             pressure_sensitivity: 0.8,
             smoothing: 0.35,
-            taper_start: 0.08,
-            taper_end: 0.03,
+            // Excalidraw's freedraw runs perfect-freehand with no start or end taper: the round
+            // caps carry the stroke's own width. A fraction-of-length taper narrowed a wide slow
+            // stroke into a long wedge ("beak") at the start. The sliders still apply both.
+            taper_start: 0.0,
+            taper_end: 0.0,
             simulate_pressure: true,
         }
     }
@@ -48,12 +51,12 @@ impl BrushSettings {
             taper_start: if self.taper_start.is_finite() {
                 self.taper_start.clamp(0.0, 0.45)
             } else {
-                0.08
+                0.0
             },
             taper_end: if self.taper_end.is_finite() {
                 self.taper_end.clamp(0.0, 0.45)
             } else {
-                0.03
+                0.0
             },
             simulate_pressure: self.simulate_pressure,
         }
@@ -173,10 +176,15 @@ impl StrokeBuilder {
             self.speed_ema = self.speed_ema * 0.65 + instant_speed * 0.35;
         }
 
-        let position_alpha = 1.0 - f64::from(self.settings.smoothing) * 0.6;
+        // Smoothing follows perfect-freehand's `streamline`: each accepted sample is
+        // interpolated from the previous smoothed point toward the raw one by `t`, so higher
+        // smoothing lags the hand more. The mapping is its constants: streamline 1 gives the
+        // floor of 0.15, streamline 0 follows the raw samples exactly.
+        let streamline = f64::from(self.settings.smoothing);
+        let t = 0.15 + (1.0 - streamline) * 0.85;
         self.smoothed = doodle_types::Point::new(
-            self.smoothed.x + (sample.pos.x - self.smoothed.x) * position_alpha,
-            self.smoothed.y + (sample.pos.y - self.smoothed.y) * position_alpha,
+            self.smoothed.x + (sample.pos.x - self.smoothed.x) * t,
+            self.smoothed.y + (sample.pos.y - self.smoothed.y) * t,
         );
 
         let pressure = self.resolved_pressure(sample);
@@ -184,8 +192,20 @@ impl StrokeBuilder {
         let factor = (1.0 - sensitivity) + sensitivity * pressure;
         let width = (f64::from(self.settings.base_width) * factor)
             .clamp(f64::from(self.settings.base_width) * 0.3, 400.0) as f32;
-        let width_alpha = 0.35 + self.settings.smoothing * 0.25;
-        self.width_ema = self.width_ema * (1.0 - width_alpha) + width * width_alpha;
+        // The first real movement already carries the speed response. Seeding the average from
+        // the pointer-down sample (which has no speed yet) and easing from there left a head
+        // about twice the body width on a stroke that started fast, so the seed point adopts
+        // the first measured width instead. A real pen is exempt: its first pressure is the
+        // deliberate start of the mark, and the lighter pen-down width must stay.
+        if self.points.len() == 1 && !self.has_hardware_pressure {
+            self.width_ema = width;
+            if let Some(seed) = self.points.first_mut() {
+                seed.1 = width;
+            }
+        } else {
+            let width_alpha = 0.35 + self.settings.smoothing * 0.25;
+            self.width_ema = self.width_ema * (1.0 - width_alpha) + width * width_alpha;
+        }
 
         self.points.push((
             doodle_types::Point::new(
@@ -413,6 +433,28 @@ mod tests {
         assert!(
             slow_mean > fast_mean * 1.2,
             "slow mean {slow_mean} should clearly exceed fast mean {fast_mean}"
+        );
+    }
+
+    #[test]
+    fn a_fast_stroke_starts_at_its_body_width() {
+        // Pointer-down carries no speed, so the seed point used to keep the slow, thick width
+        // until the average eased down; a stroke that left immediately opened with a head about
+        // twice the body. The seed now adopts the first measured sample's width, so the head and
+        // the body must agree.
+        let fast_points: Vec<(f64, f64)> = (0..40).map(|i| (i as f64 * 12.0, 0.0)).collect();
+        let (_, geometry) = trace(&fast_points, 0.016).finish();
+        let head = geometry.points[1].width;
+        let body = geometry
+            .points
+            .iter()
+            .skip(10)
+            .map(|point| point.width)
+            .sum::<f32>()
+            / geometry.points.len().saturating_sub(10) as f32;
+        assert!(
+            (head - body).abs() < body * 0.1,
+            "fast head {head} should match body {body}"
         );
     }
 

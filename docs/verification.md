@@ -295,3 +295,18 @@ Headless pass at 1180×760, dark default, `artifacts/round4-*.png`.
 | A colour tile applies at once; the next stroke draws in it | `round4-pickapply-crop.png` (coral ring) |
 | A typed hex applies and the custom swatch takes it | `round4-hex.png`, `round4-hexswatch.png` (`#1f8a3b`) |
 | The Background picker offers transparent first and clears the fill | `round4-fillloop-crop.png` plus `picker-none` in the tree dump |
+
+## Round 5 — perfect-freehand band, closed loops at 800%, picker hex preselect (2026-11-19)
+
+Headless pass at 1180×760, dark default, evidence in `artifacts/round5/`.
+
+| Change | Evidence |
+| --- | --- |
+| A slow sine is one continuous band: no internal hairline across it | `sine-slow-crop.png`, `hairline-zoom.png` (0 of 1150 columns dip below 180) |
+| A default-width slow stroke has a smooth edge at 8×, no dashed fringe | `thin-slow-8x-crop.png` (coverage 44.0 device px, edge jump 0), `thin-sine-8x-crop.png` |
+| The cap meets the body without a notch | `slowstart-start-zoom.png`, `slowstart-end-zoom.png` |
+| A speed change has no edge step | `speedchange-zoom.png` (deltas 0/±1 px) |
+| 800% Bold and Extra closed loops are continuous rings with holes | `hizoom-bold-crop.png` (99,746 interior px), `hizoom-extra-crop.png` (77,336), `hizoom-*-seam.png`; mid-band luminance uniform at 234/255 across all 3600 angles |
+| A fast 800% stroke starts at body width, no fat head | `fast800-head-zoom.png` (2→20 px over the cap, constant 20 through the body) |
+| Opening the colour picker preselects the current hex | `cargo test -p doodle-app-rune`; manual pass pending |
+| Gate | `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`, `cargo build --workspace --release --locked` all green |

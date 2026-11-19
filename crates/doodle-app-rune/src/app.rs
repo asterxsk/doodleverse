@@ -95,6 +95,10 @@ impl DoodleApp {
             ColourTarget::Fill => self.fill_rgba,
         };
         self.picker_hex.replace_text(hex_of(current));
+        // Seed the field with the whole value selected: the common next action is typing a
+        // different hex, and appending to the current one produced an invalid mix.
+        self.picker_hex.anchor = 0;
+        self.picker_hex.focus = self.picker_hex.text.len();
         self.picker = Some(target);
     }
 
