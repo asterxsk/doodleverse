@@ -5,9 +5,14 @@ use crate::icons;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Palette {
+    /// Which token set this is; a few controls (slider thumb border) need the dark-specific
+    /// counterpart token rather than a computed tint.
+    pub dark: bool,
     pub bg: Color,
     pub card: Color,
     pub border: Color,
+    /// coss `--input`: the filled control surface (slider track, switch off, outlined border).
+    pub input: Color,
     pub text: Color,
     pub muted: Color,
     /// Keybind badge ink: ≥4.5:1 on the card, the board background and `selected_bg` in both
@@ -51,9 +56,11 @@ fn linear(value: u8) -> f32 {
 pub fn palette(light: bool) -> Palette {
     if light {
         Palette {
+            dark: false,
             bg: color([255, 255, 255, 255]),
             card: color([255, 255, 255, 255]),
             border: color([0, 0, 0, 20]),
+            input: color([0, 0, 0, 26]),
             text: color([38, 38, 38, 255]),
             muted: color([96, 96, 96, 255]),
             badge_ink: color([95, 95, 95, 255]),
@@ -62,18 +69,20 @@ pub fn palette(light: bool) -> Palette {
             danger: color([251, 44, 54, 255]),
             selection: color([163, 163, 163, 255]),
             hover: color([0, 0, 0, 10]),
-            press: color([0, 0, 0, 15]),
+            press: color([0, 0, 0, 20]),
             selected_bg: color([38, 38, 38, 255]),
             selected_ink: color([250, 250, 250, 255]),
             shadow: color([0, 0, 0, 26]),
-            scrim: color([0, 0, 0, 89]),
+            scrim: color([0, 0, 0, 82]),
             statement_ink: color([45, 40, 28, 255]),
         }
     } else {
         Palette {
+            dark: true,
             bg: color([22, 22, 22, 255]),
             card: color([27, 27, 27, 255]),
             border: color([255, 255, 255, 15]),
+            input: color([255, 255, 255, 20]),
             text: color([245, 245, 245, 255]),
             muted: color([128, 128, 128, 255]),
             badge_ink: color([176, 176, 176, 255]),
@@ -82,19 +91,24 @@ pub fn palette(light: bool) -> Palette {
             danger: color([251, 44, 54, 255]),
             selection: color([115, 115, 115, 255]),
             hover: color([255, 255, 255, 10]),
-            press: color([255, 255, 255, 18]),
+            press: color([255, 255, 255, 20]),
             selected_bg: color([245, 245, 245, 255]),
             selected_ink: color([38, 38, 38, 255]),
             shadow: color([0, 0, 0, 90]),
-            scrim: color([0, 0, 0, 166]),
+            scrim: color([0, 0, 0, 82]),
             statement_ink: color([45, 40, 28, 255]),
         }
     }
 }
 
-/// coss ui's one radius scale: surfaces are 10, controls are 8.
+/// coss ui's radius scale: `--radius-lg` 10 for popover/menu surfaces, `--radius-md` 8 for
+/// controls, `--radius-xl` 12 for the toolbar, `--radius-2xl` 16 for dialogs, `--radius-sm` 6
+/// for menu items.
 pub const RADIUS_SURFACE: f32 = 10.0;
 pub const RADIUS_CONTROL: f32 = 8.0;
+pub const RADIUS_TOOLBAR: f32 = 12.0;
+pub const RADIUS_DIALOG: f32 = 16.0;
+pub const RADIUS_ITEM: f32 = 6.0;
 
 pub fn body() -> rune::TextStyle {
     tok::type_::BODY
@@ -142,16 +156,21 @@ pub fn panel(pal: &Palette) -> El {
         .shadow(10.0, 24.0, pal.shadow)
 }
 
+/// coss button: `h-8` (32), `rounded-lg`, 1px input border, 14/500 label and `shadow-xs`.
 pub fn button(key: impl Into<String>, label: &str, pal: &Palette) -> El {
     el().key(key)
-        .padding(6.0)
-        .radius(RADIUS_CONTROL)
+        .h(32.0)
+        .px(11.0)
+        .radius(RADIUS_SURFACE)
+        .items_center()
         .fill(pal.card)
+        .border(1.0, pal.input)
+        .shadow(1.0, 3.0, pal.shadow)
         .hover(pal.hover)
         .press(pal.press)
         .child(
             text(label)
-                .font(tok::TextStyle::new(12.0, 600.0))
+                .font(tok::TextStyle::new(14.0, 500.0))
                 .color(pal.text),
         )
 }
@@ -162,16 +181,18 @@ pub fn outlined_button(key: impl Into<String>, label: &str, pal: &Palette) -> El
     button(key, label, pal).border(1.0, pal.border)
 }
 
+/// coss ghost button: transparent border, accent hover and pressed, 14/500.
 pub fn flat_button(key: impl Into<String>, label: &str, pal: &Palette) -> El {
     el().key(key)
-        .padding(8.0)
-        .radius(RADIUS_CONTROL)
+        .h(32.0)
+        .px(10.0)
+        .radius(RADIUS_SURFACE)
         .items_center()
         .hover(pal.hover)
         .press(pal.press)
         .child(
             text(label)
-                .font(tok::TextStyle::new(12.0, 600.0))
+                .font(tok::TextStyle::new(14.0, 500.0))
                 .color(pal.text),
         )
 }
@@ -191,9 +212,9 @@ pub fn flat_icon_button(key: impl Into<String>, pal: &Palette) -> El {
 /// A dropdown menu row: 32 tall, control radius, 14/400.
 pub fn menu_row(key: impl Into<String>, label: &str, pal: &Palette) -> El {
     el().key(key)
-        .h(32.0)
+        .h(28.0)
         .px(8.0)
-        .radius(RADIUS_CONTROL)
+        .radius(RADIUS_ITEM)
         .items_center()
         .hover(pal.hover)
         .press(pal.press)
@@ -207,10 +228,10 @@ pub fn menu_row(key: impl Into<String>, label: &str, pal: &Palette) -> El {
 /// [`menu_row`] with a leading Lucide icon, for a row whose action has a clear glyph.
 pub fn menu_row_icon(key: impl Into<String>, label: &str, icon: &str, pal: &Palette) -> El {
     el().key(key)
-        .h(32.0)
+        .h(28.0)
         .px(8.0)
         .gap(8.0)
-        .radius(RADIUS_CONTROL)
+        .radius(RADIUS_ITEM)
         .items_center()
         .hover(pal.hover)
         .press(pal.press)
@@ -226,8 +247,8 @@ pub fn menu_row_icon(key: impl Into<String>, label: &str, icon: &str, pal: &Pale
 /// tool to assistive technology; Rune reports it as the button's pressed state.
 pub fn tool_button(key: impl Into<String>, selected: bool, pal: &Palette) -> El {
     el().key(key)
-        .size(36.0, 36.0)
-        .radius(RADIUS_CONTROL)
+        .size(32.0, 32.0)
+        .radius(RADIUS_SURFACE)
         .items_center()
         .justify_center()
         .checked(selected)
@@ -282,6 +303,48 @@ pub fn choice_button(key: impl Into<String>, label: &str, active: bool, pal: &Pa
                 .font(rune::TextStyle::new(11.0, 600.0))
                 .color(ink),
         )
+}
+
+/// coss switch: an 18×30 rounded track (`--thumb-size` 16 plus the 1pt padding), primary when
+/// on and `input` when off, with a background-coloured thumb that springs between the ends.
+pub fn switch(key: impl Into<String>, on: bool, pal: &Palette) -> El {
+    let left = if on { 13.0 } else { 1.0 };
+    el().key(key)
+        .size(30.0, 18.0)
+        .radius(9.0)
+        .fill(if on { pal.selected_bg } else { pal.input })
+        .checked(on)
+        .hit()
+        .motion(motion::SNAPPY)
+        .child(
+            el().absolute(left, 1.0)
+                .size(16.0, 16.0)
+                .radius(8.0)
+                .fill(if pal.dark {
+                    pal.bg
+                } else {
+                    color([255, 255, 255, 255])
+                })
+                .shadow(2.0, 4.0, pal.shadow)
+                .motion(motion::SNAPPY)
+                .hit(),
+        )
+}
+
+/// A labelled switch row: a 14/500 label and an optional muted description.
+pub fn switch_row(key: impl Into<String>, label: &str, on: bool, pal: &Palette) -> El {
+    let key: String = key.into();
+    el().key(key.clone())
+        .w_full()
+        .items_center()
+        .gap(8.0)
+        .child(
+            text(label)
+                .font(tok::TextStyle::new(14.0, 500.0))
+                .color(pal.text)
+                .grow(1.0),
+        )
+        .child(switch(format!("{key}-switch"), on, pal))
 }
 
 pub fn swatch(key: impl Into<String>, rgba: [u8; 4], selected: bool, pal: &Palette) -> El {
@@ -341,4 +404,9 @@ pub fn section(title_text: &str, pal: &Palette) -> El {
 /// coss section labels: 12pt, medium weight, sentence case, muted.
 pub fn section_style() -> rune::TextStyle {
     rune::TextStyle::new(12.0, 500.0)
+}
+
+/// coss Field label: 14pt medium in the primary ink, the weight every control caption uses.
+pub fn field_label_style() -> rune::TextStyle {
+    rune::TextStyle::new(14.0, 500.0)
 }

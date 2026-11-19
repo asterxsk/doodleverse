@@ -227,3 +227,26 @@ orchestrator's screenshot pass.
 
 Not claimed here: the subjective feel of the hatch patterns and pressure curve. Those are checked
 by the orchestrator's screenshot and critic pass.
+
+## coss component, icon and zoom pass (2026-11-19)
+
+Driven headlessly at 1180×760 in dark (the default) with `--script`/`--snap`, plus unit tests
+for the icon glyphs.
+
+| Area | Result |
+| --- | --- |
+| Launch opens dark: `#161616` card chrome, `#161616` board, neutral grid | Verified in `artifacts/blueprint-coss/50-farzoom-aa.png` and `54-panel-labels.png` |
+| Toolbar follows coss Toolbar: `rounded-xl` card, p-1, 32pt ghost buttons, 1px separators | Verified in the same frames |
+| Slider follows coss Slider: 4pt input track, primary indicator, 16pt white thumb with dark background border, 1.2 press scale | Verified; thumb glides and grows while dragging |
+| Switch follows coss Switch: 18×30 primary/input track, 16pt thumb, spring | Verified for Pressure on and off |
+| Field labels use the coss 14/500 primary ink with a 14/400 muted value | Verified in the panel crop |
+| Menus, dialogs, settings/help/tool panels enter with `Transition::scale` 0.96–0.98 plus fade | Verified in the element tree; frames sampled mid-entry show the scaled state |
+| Icons: Material Symbols Rounded (filled) through Rune's SVG engine, 25 glyphs | Verified per glyph with `rune::text::icon_coverage`; toolbar and cursors inspected in crops |
+| Diamond tool glyph is a rhombus (rotated set square), not the faceted gem | Verified in `53-toolbar-crop.png` |
+| Pen and sticky cursors rasterised from the same glyphs with a white halo; hotspots on the tip and note corner | Verified by regenerating the PNGs and reading them back; hotspots `[7.5,24.5]` and `[6.3,6.3]` |
+| Far-zoom AA: strokes below one screen point drop to one 1pt antialiased polyline | Verified at 3% and ~17% zoom in `50-farzoom-aa*.png` and `51-far/out-crop.png`; no staircase |
+| Taper unchanged at normal zoom: filled outline run with round end discs | Verified in `41-dark-taper.png` after the change |
+
+Gate for this pass: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets
+--locked -- -D warnings`, `cargo test --workspace --locked` (101 passed, 1 ignored — the cursor
+regeneration test), `cargo build --workspace --release --locked`.

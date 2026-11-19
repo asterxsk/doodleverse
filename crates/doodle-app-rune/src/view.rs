@@ -1,5 +1,6 @@
 use doodle_render::GridKind;
 use doodle_types::{FillStyle, StatementKind};
+use rune::tok::motion;
 use rune::{
     Color, Cx, El, Key, KeyEvent, ScrollSpec, Transition, Tx, canvas, col, edit_access, el, row,
     text, text_input,
@@ -395,10 +396,8 @@ fn menu_popover(pal: &Palette) -> El {
     );
     island(pal)
         .key("menu-popover")
-        // Menus mount and unmount instantly: no fade or scale, open or close, and no child
-        // entrance either.
-        .instant_changes()
-        .transition(Transition::none())
+        // coss menu popup: scale from 96 % with a fade, on the default spring.
+        .transition(Transition::scale(0.96))
         .absolute(12.0, 64.0)
         .w(228.0)
         .padding(8.0)
@@ -407,17 +406,17 @@ fn menu_popover(pal: &Palette) -> El {
 
 fn tool_icon(tool: Tool, ink: Color) -> El {
     let name = match tool {
-        Tool::Draw => "pencil",
-        Tool::Select => "mouse-pointer-2",
+        Tool::Draw => "pen",
+        Tool::Select => "pointer",
         Tool::Hand => "hand",
         Tool::Eraser => "eraser",
-        Tool::Rectangle => "square",
+        Tool::Rectangle => "rectangle",
         Tool::Diamond => "diamond",
         Tool::Ellipse => "circle",
-        Tool::Arrow => "arrow-right",
-        Tool::Line => "minus",
-        Tool::Sticky => "sticky-note",
-        Tool::Text => "type",
+        Tool::Arrow => "arrow",
+        Tool::Line => "line",
+        Tool::Sticky => "sticky",
+        Tool::Text => "text",
     };
     icons::icon(name, 16.0, ink)
 }
@@ -471,13 +470,15 @@ fn toolbar_island(s: &DoodleApp, pal: &Palette) -> El {
     ] {
         bar = bar.child(tool_item(s, pal, tool, name, key));
     }
-    let card = if locked {
-        // Locked means no mount or position animation at all: the bar is pinned and stays put
-        // through card open/close and resize.
-        island(pal).instant_changes().transition(Transition::none())
-    } else {
-        island(pal)
-    };
+    // coss Toolbar: `rounded-xl border bg-card p-1`, groups at `gap-1`, separators between.
+    let card = el()
+        .hit()
+        .padding(4.0)
+        .radius(theme::RADIUS_TOOLBAR)
+        .fill(pal.card)
+        .border(1.0, pal.border)
+        .instant_changes()
+        .transition(Transition::none());
     el().key("toolbar-island")
         .absolute(0.0, 10.0)
         .w_full()
@@ -530,7 +531,7 @@ fn tool_settings_panel(s: &DoodleApp, pal: &Palette) -> El {
                 chip = chip
                     .items_center()
                     .justify_center()
-                    .child(icons::icon("x", 10.0, pal.muted));
+                    .child(icons::icon("close", 10.0, pal.muted));
             }
             background_row = background_row.child(chip);
         }
@@ -574,20 +575,10 @@ fn tool_settings_panel(s: &DoodleApp, pal: &Palette) -> El {
     }
 
     if s.tool_panel_pen() {
-        let mut pressure = row().gap(4.0).w_full();
-        for (enabled, label) in [(false, "Off"), (true, "On")] {
-            pressure = pressure.child(
-                theme::choice_button(
-                    format!("tool-pressure-{label}"),
-                    label,
-                    s.pressure_enabled == enabled,
-                    pal,
-                )
-                .grow(1.0)
-                .on_press(move |s: &mut DoodleApp| s.pressure_enabled = enabled),
-            );
-        }
-        body = body.child(panel_section(pal, "Pressure", pressure));
+        // coss Field + Switch: the label on the left, the 30×18 switch on the right.
+        let pressure = theme::switch_row("tool-pressure", "Pressure", s.pressure_enabled, pal)
+            .on_press(|s: &mut DoodleApp| s.pressure_enabled = !s.pressure_enabled);
+        body = body.child(pressure);
     }
 
     let mut opacity = col().gap(6.0).w_full();
@@ -597,13 +588,13 @@ fn tool_settings_panel(s: &DoodleApp, pal: &Palette) -> El {
             .items_center()
             .child(
                 text("Opacity")
-                    .font(theme::caption())
-                    .color(pal.muted)
+                    .font(theme::field_label_style())
+                    .color(pal.text)
                     .grow(1.0),
             )
             .child(
                 text(format!("{:.0}%", s.opacity * 100.0))
-                    .font(theme::caption())
+                    .font(rune::tok::TextStyle::new(14.0, 400.0))
                     .color(pal.muted),
             ),
     );
@@ -618,24 +609,33 @@ fn tool_settings_panel(s: &DoodleApp, pal: &Palette) -> El {
     ));
     body = body.child(opacity);
 
-    el().key("tool-settings-panel")
-        .absolute(crate::app::TOOL_PANEL_X, crate::app::TOOL_PANEL_Y)
+    // The panel floats at the left edge, vertically centred on the window rather than pinned
+    // under the toolbar, so the tools sit at eye level. The anchor spans the full height and is
+    // not hit-testable; only the panel itself takes pointer input.
+    col()
+        .key("tool-settings-anchor")
+        .absolute(crate::app::TOOL_PANEL_X, 0.0)
         .w(crate::app::TOOL_PANEL_WIDTH)
-        // Mounting and unmounting are instant: the panel is contextual chrome and must not
-        // fade under the toolbar when the tool changes.
-        .instant_changes()
-        .transition(Transition::none())
-        .on_drawn_layout(|s: &mut DoodleApp, rect: [f32; 4]| {
-            s.tool_panel_layout = rect;
-        })
-        .child(body)
+        .h(s.window_size[1])
+        .justify_center()
+        .child(
+            body.key("tool-settings-panel")
+                .w(crate::app::TOOL_PANEL_WIDTH)
+                // coss popup motion: a small scale-up with the fade as the panel appears for a
+                // drawing tool and leaves for a navigation tool.
+                .transition(Transition::scale(0.98))
+                .on_drawn_layout(|s: &mut DoodleApp, rect: [f32; 4]| {
+                    s.tool_panel_layout = rect;
+                }),
+        )
 }
 
 fn panel_section(pal: &Palette, title: &str, control: El) -> El {
+    // coss `Field`: a 14/500 label in the primary ink above its control.
     col()
         .w_full()
         .gap(6.0)
-        .child(theme::section(title, pal))
+        .child(text(title).font(theme::field_label_style()).color(pal.text))
         .child(control)
 }
 
@@ -646,10 +646,10 @@ fn history_row(s: &DoodleApp, pal: &Palette) -> El {
     // undo/redo buttons read as disabled buttons rather than anonymous groups.
     let mut undo = theme::flat_icon_button("undo", pal)
         .label("Undo")
-        .child(icons::icon("undo-2", 16.0, pal.text));
+        .child(icons::icon("undo", 16.0, pal.text));
     let mut redo = theme::flat_icon_button("redo", pal)
         .label("Redo")
-        .child(icons::icon("redo-2", 16.0, pal.text));
+        .child(icons::icon("redo", 16.0, pal.text));
     if undo_depth > 0 {
         undo = undo.on_press(|s: &mut DoodleApp| {
             dismiss_popovers(s);
@@ -695,7 +695,7 @@ fn bottom_cluster(s: &DoodleApp, pal: &Palette) -> El {
             "Board settings",
             s.show_settings,
             pal,
-            "book-open",
+            "settings",
         )
         .on_press(|s: &mut DoodleApp| {
             dismiss_popovers(s);
@@ -733,9 +733,8 @@ fn minimap_panel(s: &DoodleApp, pal: &Palette) -> El {
     let [x, y, width, height] = s.minimap_rect();
     theme::island(pal)
         .key("minimap-panel")
-        // Foreground panels replace each other in the same commit; entering and leaving at once
-        // keeps the closing one from fading over the one that opened.
-        .transition(Transition::none())
+        // coss popup motion; the 0.98 scale keeps a quick open from reading as a flash.
+        .transition(Transition::scale(0.98))
         .absolute(x, y)
         .padding(0.0)
         .w(width)
@@ -779,8 +778,8 @@ fn overflow_island(s: &DoodleApp, pal: &Palette) -> El {
     let ink = if open { pal.selected_ink } else { pal.text };
     let button = el()
         .key("overflow-toggle")
-        .size(36.0, 36.0)
-        .radius(8.0)
+        .size(32.0, 32.0)
+        .radius(theme::RADIUS_SURFACE)
         .items_center()
         .justify_center()
         .fill(if open {
@@ -796,7 +795,7 @@ fn overflow_island(s: &DoodleApp, pal: &Palette) -> El {
             s.overflow_open = !s.overflow_open;
         })
         .on_drag(|s: &mut DoodleApp, drag, _| s.popover_trigger_drag(drag))
-        .child(icons::icon("ellipsis-vertical", 16.0, ink));
+        .child(icons::icon("more", 16.0, ink));
     island(pal)
         .key("overflow-island")
         .pin(None, Some(12.0), Some(10.0), None)
@@ -851,17 +850,12 @@ fn overflow_popover(s: &DoodleApp, pal: &Palette) -> El {
         );
     }
     items = items.child(
-        theme::menu_row_icon(
-            "menu-help",
-            "Shortcuts & about",
-            "circle-question-mark",
-            pal,
-        )
-        .w_full()
-        .on_press(|s: &mut DoodleApp| {
-            s.open_help();
-            s.overflow_open = false;
-        }),
+        theme::menu_row_icon("menu-help", "Shortcuts & about", "help", pal)
+            .w_full()
+            .on_press(|s: &mut DoodleApp| {
+                s.open_help();
+                s.overflow_open = false;
+            }),
     );
     items = items.child(theme::divider_h(pal));
     items = items.child(
@@ -874,10 +868,8 @@ fn overflow_popover(s: &DoodleApp, pal: &Palette) -> El {
     );
     island(pal)
         .key("overflow-popover")
-        // Menus mount and unmount instantly: no fade or scale, open or close, and no child
-        // entrance either.
-        .instant_changes()
-        .transition(Transition::none())
+        // coss menu popup: scale from 96 % with a fade, on the default spring.
+        .transition(Transition::scale(0.96))
         .pin(None, Some(64.0), Some(10.0), None)
         .w(200.0)
         .padding(8.0)
@@ -904,7 +896,13 @@ fn slider(
     target: Target,
     value_text: String,
 ) -> El {
-    let knob_left = (width - 12.0) * fraction;
+    // coss slider: a 4pt `bg-input` track inset 2pt each side, a `bg-primary` indicator that
+    // runs to the thumb centre, and a 16pt white thumb with an `input` (light) or `background`
+    // (dark) border that scales to 1.2 while dragged.
+    const THUMB: f32 = 16.0;
+    const TRACK: f32 = 4.0;
+    let thumb_left = 2.0 + (width - 4.0 - THUMB).max(0.0) * fraction;
+    let filled = (thumb_left + THUMB * 0.5 - 2.0).max(0.0);
     el().key(format!("slider-{key}"))
         .label(label)
         // Rune has an accessible slider role and value, so advertise it to assistive
@@ -918,35 +916,70 @@ fn slider(
             s.apply_slider(target, next.clamp(0.0, 1.0));
         })
         .w(width)
-        .h(18.0)
-        .radius(9.0)
-        .fill(pal.press)
-        .border(1.0, pal.border)
+        .h(20.0)
+        .hit()
         .on_drag(move |s: &mut DoodleApp, drag, _| {
             if drag.w > 0.0 {
                 s.apply_slider(target, f64::from(drag.x / drag.w));
             }
         })
+        // A thin recessed track with a filled progress run and a raised knob; the old pill
+        // with a flat 12pt dot read as a disabled control.
         .child(
-            el().absolute(knob_left, 3.0)
-                .size(12.0, 12.0)
-                .radius(6.0)
+            el().absolute(2.0, (20.0 - TRACK) * 0.5)
+                .w(width - 4.0)
+                .h(TRACK)
+                .radius(TRACK * 0.5)
+                .fill(pal.input),
+        )
+        .child(
+            el().absolute(2.0, (20.0 - TRACK) * 0.5)
+                .w(filled)
+                .h(TRACK)
+                .radius(TRACK * 0.5)
                 .fill(pal.accent)
+                .motion(motion::SNAPPY),
+        )
+        .child(
+            el().absolute(thumb_left, (20.0 - THUMB) * 0.5)
+                .size(THUMB, THUMB)
+                .radius(THUMB * 0.5)
+                .fill(theme::color([255, 255, 255, 255]))
+                .border(1.0, if pal.dark { pal.bg } else { pal.input })
+                .shadow(2.0, 5.0, pal.shadow)
+                .press_scale(1.2)
+                .motion(motion::SNAPPY)
                 .hit(),
         )
 }
 
 fn slider_row(s: &DoodleApp, pal: &Palette, label: &str, key: &str, target: Target) -> El {
-    row()
-        .gap(8.0)
-        .items_center()
+    let width = 304.0;
+    col()
+        .gap(6.0)
         .w_full()
-        .child(text(label).font(theme::caption()).color(pal.muted).w(104.0))
+        .child(
+            row()
+                .w_full()
+                .items_center()
+                .child(
+                    text(label)
+                        .font(rune::tok::TextStyle::new(14.0, 500.0))
+                        .color(pal.text)
+                        .grow(1.0),
+                )
+                // coss `SliderValue`: `text-sm`, muted, right aligned under the label row.
+                .child(
+                    text(s.slider_value_text(target))
+                        .font(rune::tok::TextStyle::new(14.0, 400.0))
+                        .color(pal.muted),
+                ),
+        )
         .child(slider(
             pal,
             key,
             label,
-            168.0,
+            width,
             s.slider_fraction(target),
             target,
             s.slider_value_text(target),
@@ -1102,7 +1135,7 @@ fn settings_panel(s: &DoodleApp, pal: &Palette) -> El {
 
     body = body.child(theme::divider_h(pal));
     body = body.child(
-        theme::active_button("reduced-motion", "Reduced motion", s.reduced_motion, pal)
+        theme::switch_row("reduced-motion", "Reduced motion", s.reduced_motion, pal)
             .on_press(|s: &mut DoodleApp| s.reduced_motion = !s.reduced_motion),
     );
     body = body.child(
@@ -1147,9 +1180,8 @@ fn settings_panel(s: &DoodleApp, pal: &Palette) -> El {
     let x = if s.tool_panel_visible() { 240.0 } else { 140.0 };
     theme::island_col(pal)
         .key("settings-panel")
-        // Foreground panels replace each other in the same commit; entering and leaving at once
-        // keeps the closing one from fading over the one that opened.
-        .transition(Transition::none())
+        // coss popup motion, so the panel settles in instead of appearing whole.
+        .transition(Transition::scale(0.98))
         .absolute(x, 84.0)
         .w(320.0)
         .h(height)
@@ -1266,9 +1298,8 @@ fn help_panel(s: &DoodleApp, pal: &Palette) -> El {
     );
     theme::island_col(pal)
         .key("help-panel")
-        // Foreground panels replace each other in the same commit; entering and leaving at once
-        // keeps the closing one from fading over the one that opened.
-        .transition(Transition::none())
+        // coss popup motion, so the panel settles in instead of appearing whole.
+        .transition(Transition::scale(0.98))
         .absolute(x, y)
         .w(width)
         .h(height)
@@ -1462,6 +1493,7 @@ fn centered(
         .w_full()
         .h_full()
         .fill(pal.scrim)
+        .backdrop_blur(4.0)
         .items_center()
         .justify_center()
         .role("dialog")
@@ -1475,8 +1507,10 @@ fn centered(
                 .child(
                     theme::island(pal)
                         .w(width)
-                        .radius(theme::RADIUS_SURFACE)
-                        .padding(16.0)
+                        .radius(theme::RADIUS_DIALOG)
+                        .padding(24.0)
+                        // coss dialog popup: 200 ms scale 0.98 → 1 with the fade.
+                        .transition(Transition::scale(0.98))
                         .child(body),
                 ),
         )

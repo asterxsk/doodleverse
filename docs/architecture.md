@@ -94,9 +94,13 @@ Two front ends sit on the same crates. `doodle-app` is the original eframe/egui 
 `958743308f36fdf1c568c513badc96ddb0c7f040`.
 
 Both draw one full-window canvas layer and absolutely positioned islands above it. The Rune
-shell now uses coss ui's neutral token set: a board menu island top left, a centred toolbar
-that only selects tools (lock, then the eleven tools), a three-dot overflow top right, and a
-fixed left tool-settings panel for the active drawing tool. The panel carries stroke swatches,
+shell now uses coss ui's neutral token set and component anatomy, dark by default and light
+from Canvas settings: a board menu island top left, a centred toolbar that only selects tools
+(lock, then the eleven tools), a three-dot overflow top right, and a left tool-settings panel
+vertically centred beside the board for the active drawing tool, entering with coss's
+scale-and-fade motion. Menus, dialogs and the settings/help panels share that motion; the
+slider, switch, toolbar, buttons and menu rows follow the coss specs in D47. The panel carries
+stroke swatches,
 closed-shape background and fill style, stroke-width presets, the pen pressure switch and
 opacity; Sticky replaces the stroke row with six note tints and Text colours statements with
 the stroke ink. It is hidden for Hand, Select, Eraser and zen mode. A bottom-left cluster holds zoom,
@@ -121,9 +125,15 @@ and stroke width, and the line count is capped so deep zoom-out stays cheap. Ope
 fill. The board background, grid ink and the Slate/Ink presets are neutral in both themes, and a
 sticky note picks light or dark ink from its own fill luminance so every note tint stays legible.
 
-Rune has no per-vertex canvas mesh, so a pressure stroke is emitted as width-bucketed line
-paths, each stroked once with round caps. That approximates the eframe tapered mesh at the cost
-of a slightly stepped width; the segment budget is capped at 200k.
+Rune has no per-vertex canvas mesh, so a pressure stroke is emitted as one filled outline per
+run, with a left offset chain forward and a right offset chain back, plus a round disc at each
+end and at each sharp turn. The outline interpolates the measured width point by point, so a
+speed taper reads as one continuous edge instead of a ladder of stroked capsules. Zoomed far
+out, where every measured width lands under a screen point, the run drops to a single
+antialiased 1pt polyline with round caps; the same treatment a vector editor gives a
+scaled-down line, which fades smoothly instead of stepping. The segment budget is capped at 200k.
+The pointer cursor for the pen and sticky tools is rasterised from the same Material glyphs as
+the toolbar, with a white halo so it reads on any board tint.
 File dialogs use Rune's `Tx::open_file` / `Tx::save_file` (feature `native-file-dialog`), so
 headless runs can answer them with scripted `file-dialog` events. The app icon is set with
 `rune::set_app_icon` from the same `assets/app-icon.png` the eframe shell embeds.

@@ -221,7 +221,7 @@ impl StrokeBuilder {
         // the builder's `min_distance` is derived from the zoom (`0.7 / zoom`).
         let screen_speed = self.speed_ema * 0.7 / self.min_distance;
         let speed_norm = (screen_speed / 300.0).clamp(0.0, 1.0);
-        (1.2 - 0.8 * speed_norm).clamp(0.4, 1.2)
+        (1.6 - 1.3 * speed_norm).clamp(0.25, 1.6)
     }
 
     #[must_use]

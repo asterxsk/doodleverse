@@ -272,7 +272,7 @@ pub fn card_views(s: &DoodleApp, pal: &Palette) -> Vec<El> {
             .child(
                 theme::flat_icon_button(format!("card-close-{id}"), pal)
                     .label("Close Dibby")
-                    .child(icons::icon("x", 16.0, pal.text))
+                    .child(icons::icon("close", 16.0, pal.text))
                     .on_press(move |s: &mut DoodleApp| s.close_card(id)),
             );
         body = body.child(header);

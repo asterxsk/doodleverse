@@ -1,559 +1,163 @@
-//! Lucide icons, drawn as Rune shape strokes.
+//! Material Symbols Rounded (filled) icons, drawn by Rune's SVG icon engine.
 //!
-//! The path data is vendored from Lucide (ISC; see `assets/icons/`) and keeps the set's 24-unit
-//! view box, 2-unit stroke, round caps and round joins. [`icon`] scales both the geometry and the
-//! stroke to the requested size, so a 16pt icon is a true 16pt Lucide glyph.
-//!
-//! Paths are parsed per view rather than cached: each glyph is a handful of cubic segments and
-//! the data is static, so rebuilding it is cheaper than sharing a shape across views.
+//! Path data is vendored from `google/material-design-icons` at commit
+//! `10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7` (Apache-2.0; license text in
+//! `assets/icons/LICENSE-material-symbols.txt`). The set uses a 960-unit grid with negative Y;
+//! each body translates the glyph into Rune's `0 0 view view` box, so no path data is rewritten.
+//! The selection record is `docs/plans/icon-selection.md`.
 
-use rune::{Color, El, LineCap, Path, Shape, canvas};
+use rune::{Color, El, Icon};
 
-/// Lucide's view box and stroke width, in icon units.
-const VIEW_BOX: f32 = 24.0;
-const STROKE: f32 = 2.0;
-
-struct IconDef {
-    name: &'static str,
-    paths: &'static [&'static str],
+const fn filled(name: &'static str, path: &'static str) -> Icon {
+    Icon {
+        name,
+        view: 960.0,
+        body: path,
+    }
 }
 
-/// One entry per vendored SVG in `assets/icons/lucide/`. A multi-element icon keeps one `d` per
-/// element; `<circle>` and `<rect>` elements are written out as equivalent path data.
-const ICONS: &[IconDef] = &[
-    IconDef {
-        name: "arrow-right",
-        paths: &["M5 12h14", "m12 5 7 7-7 7"],
-    },
-    IconDef {
-        name: "book-open",
-        paths: &[
-            "M12 5v16",
-            "M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z",
-        ],
-    },
-    IconDef {
-        name: "circle",
-        // `<circle cx="12" cy="12" r="10" />`
-        paths: &["M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0"],
-    },
-    IconDef {
-        name: "circle-question-mark",
-        paths: &[
-            // `<circle cx="12" cy="12" r="10" />`
-            "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0",
-            "M9 9.5a3 2.5 0 016 0c0 2-2 2-3 3.5",
-            "M12 17h.01",
-        ],
-    },
-    IconDef {
-        name: "diamond",
-        paths: &[
-            "M2.7 10.3a2.41 2.41 0 0 0 0 3.41l7.59 7.59a2.41 2.41 0 0 0 3.41 0l7.59-7.59a2.41 2.41 0 0 0 0-3.41l-7.59-7.59a2.41 2.41 0 0 0-3.41 0Z",
-        ],
-    },
-    IconDef {
-        name: "ellipsis-vertical",
-        paths: &[
-            // `<circle cx="12" cy="12" r="1" />`
-            "M11 12a1 1 0 1 0 2 0a1 1 0 1 0-2 0",
-            // `<circle cx="12" cy="5" r="1" />`
-            "M11 5a1 1 0 1 0 2 0a1 1 0 1 0-2 0",
-            // `<circle cx="12" cy="19" r="1" />`
-            "M11 19a1 1 0 1 0 2 0a1 1 0 1 0-2 0",
-        ],
-    },
-    IconDef {
-        name: "eraser",
-        paths: &[
-            "M21 21H8a2 2 0 0 1-1.42-.587l-3.994-3.999a2 2 0 0 1 0-2.828l10-10a2 2 0 0 1 2.829 0l5.999 6a2 2 0 0 1 0 2.828L12.834 21",
-            "m5.082 11.09 8.828 8.828",
-        ],
-    },
-    IconDef {
-        name: "hand",
-        paths: &[
-            "M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2",
-            "M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2",
-            "M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8",
-            "M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15",
-        ],
-    },
-    IconDef {
-        name: "lock",
-        paths: &[
-            // `<rect width="18" height="11" x="3" y="11" rx="2" ry="2" />`
-            "M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z",
-            "M7 11V7a5 5 0 0 1 10 0v4",
-        ],
-    },
-    IconDef {
-        name: "map",
-        paths: &[
-            "M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z",
-            "M15 5.764v15",
-            "M9 3.236v15",
-        ],
-    },
-    IconDef {
-        name: "minus",
-        paths: &["M5 12h14"],
-    },
-    IconDef {
-        name: "mouse-pointer-2",
-        paths: &[
-            "M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z",
-        ],
-    },
-    IconDef {
-        name: "pencil",
-        paths: &[
-            "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z",
-            "m15 5 4 4",
-        ],
-    },
-    IconDef {
-        name: "redo-2",
-        paths: &[
-            "m15 14 5-5-5-5",
-            "M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13",
-        ],
-    },
-    IconDef {
-        name: "square",
-        paths: &[
-            // `<rect width="18" height="18" x="3" y="3" rx="2" />`
-            "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z",
-        ],
-    },
-    IconDef {
-        name: "sticky-note",
-        paths: &[
-            "M21 9a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z",
-            "M15 3v5a1 1 0 0 0 1 1h5",
-        ],
-    },
-    IconDef {
-        name: "type",
-        paths: &[
-            "M12 4v16",
-            "M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2",
-            "M9 20h6",
-        ],
-    },
-    IconDef {
-        name: "undo-2",
-        paths: &[
-            "M9 14 4 9l5-5",
-            "M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11",
-        ],
-    },
-    IconDef {
-        name: "x",
-        paths: &["M18 6 6 18", "m6 6 12 12"],
-    },
-];
+// Tool glyphs.
+static HAND: Icon = filled(
+    "hand",
+    "<path transform=\"translate(0 960)\" d=\"M402-40q-30 0-56-13.5T303-92L67-438q-8-12-7-26t12-24q19-19 45-22t47 12l116 81v-383q0-17 11.5-28.5T320-840q17 0 28.5 11.5T360-800v320h80v-400q0-17 11.5-28.5T480-920q17 0 28.5 11.5T520-880v400h80v-360q0-17 11.5-28.5T640-880q17 0 28.5 11.5T680-840v360h80v-280q0-17 11.5-28.5T800-800q17 0 28.5 11.5T840-760v560q0 66-47 113T680-40H402Z\"/>",
+);
+static POINTER: Icon = filled(
+    "pointer",
+    "<path transform=\"translate(0 960)\" d=\"M606-105q-23 11-46 2.5T526-134L406-392l-93 130q-17 24-45 15t-28-38v-513q0-25 22.5-36t42.5 5l404 318q23 17 13.5 44T684-440H516l119 255q11 23 2.5 46T606-105Z\"/>",
+);
+static RECTANGLE: Icon = filled(
+    "rectangle",
+    "<path transform=\"translate(0 960)\" d=\"M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Z\"/>",
+);
+// The diamond tool draws a rhombus, so its glyph is the set's square turned 45° and scaled to
+// fit the 960 box; the glyph named "diamond" is a faceted gem and read as a kite at 16pt.
+static DIAMOND: Icon = filled(
+    "diamond",
+    "<path transform=\"rotate(45 480 480) translate(480 480) scale(0.85) translate(-480 -480) translate(0 960)\" d=\"M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Z\"/>",
+);
+static CIRCLE: Icon = filled(
+    "circle",
+    "<path transform=\"translate(0 960)\" d=\"M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Z\"/>",
+);
+static ARROW: Icon = filled(
+    "arrow",
+    "<path transform=\"translate(0 960)\" d=\"M680-624 244-188q-11 11-28 11t-28-11q-11-11-11-28t11-28l436-436H400q-17 0-28.5-11.5T360-720q0-17 11.5-28.5T400-760h320q17 0 28.5 11.5T760-720v320q0 17-11.5 28.5T720-360q-17 0-28.5-11.5T680-400v-224Z\"/>",
+);
+static LINE: Icon = filled(
+    "line",
+    "<path transform=\"translate(0 960)\" d=\"M180-380q-42 0-71-29t-29-71q0-42 29-71t71-29q31 0 56 17t36 43h568q17 0 28.5 11.5T880-480q0 17-11.5 28.5T840-440H272q-11 26-36 43t-56 17Z\"/>",
+);
+static PEN: Icon = filled(
+    "pen",
+    "<path transform=\"translate(0 960)\" d=\"M200-120q-17 0-28.5-11.5T160-160v-97q0-16 6-30.5t17-25.5l504-503q12-12 27-18t30-6q16 0 30.5 6t25.5 18l56 56q12 11 18 25.5t6 30.5q0 15-6 30t-18 27L353-143q-11 11-25.5 17t-30.5 6h-97Zm546-529 54-54-57-57-54 54 57 57ZM560-120q74 0 137-37t63-103q0-32-16-55.5T702-359q-14-10-30-10t-27 12q-11 12-11 29.5t14 27.5q14 11 23 20t9 20q0 23-36.5 41.5T560-200q-17 0-28.5 11.5T520-160q0 17 11.5 28.5T560-120ZM360-720q0 14-17.5 25.5T262-654q-80 35-111 63.5T120-520q0 26 12 46t31 35q13 11 29 9.5t27-14.5q11-13 10-29t-14-27q-7-5-11-10t-4-10q0-12 18-24t76-37q88-38 117-69t29-70q0-55-44-87.5T280-840q-45 0-80.5 16T145-785q-11 13-9 29t15 26q13 11 29 9t27-13q14-14 31-20t42-6q41 0 60.5 12t19.5 28Z\"/>",
+);
+static TEXT: Icon = filled(
+    "text",
+    "<path transform=\"translate(0 960)\" d=\"M420-680H260q-25 0-42.5-17.5T200-740q0-25 17.5-42.5T260-800h440q25 0 42.5 17.5T760-740q0 25-17.5 42.5T700-680H540v460q0 25-17.5 42.5T480-160q-25 0-42.5-17.5T420-220v-460Z\"/>",
+);
+static STICKY: Icon = filled(
+    "sticky",
+    "<path transform=\"translate(0 960)\" d=\"m560-200 200-200H600q-17 0-28.5 11.5T560-360v160Zm-360 80q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v367q0 16-6 30.5T817-337L623-143q-11 11-25.5 17t-30.5 6H200Zm120-280h120q17 0 28.5-11.5T480-440q0-17-11.5-28.5T440-480H320q-17 0-28.5 11.5T280-440q0 17 11.5 28.5T320-400Zm0-160h320q17 0 28.5-11.5T680-600q0-17-11.5-28.5T640-640H320q-17 0-28.5 11.5T280-600q0 17 11.5 28.5T320-560Z\"/>",
+);
+static ERASER: Icon = filled(
+    "eraser",
+    "<path transform=\"translate(0 960)\" d=\"M690-240h150q17 0 28.5 11.5T880-200q0 17-11.5 28.5T840-160H610l80-80Zm-483 80q-8 0-15.5-3t-13.5-9l-73-73q-23-23-23.5-57t22.5-58l440-456q23-24 56.5-24t56.5 23l199 199q23 23 23 57t-23 57L532-172q-6 6-13.5 9t-15.5 3H207Z\"/>",
+);
+
+// Actions and chrome.
+static LOCK: Icon = filled(
+    "lock",
+    "<path transform=\"translate(0 960)\" d=\"M240-80q-33 0-56.5-23.5T160-160v-400q0-33 23.5-56.5T240-640h40v-80q0-83 58.5-141.5T480-920q83 0 141.5 58.5T680-720v80h40q33 0 56.5 23.5T800-560v400q0 33-23.5 56.5T720-80H240Zm240-200q33 0 56.5-23.5T560-360q0-33-23.5-56.5T480-440q-33 0-56.5 23.5T400-360q0 33 23.5 56.5T480-280ZM360-640h240v-80q0-50-35-85t-85-35q-50 0-85 35t-35 85v80Z\"/>",
+);
+static MENU: Icon = filled(
+    "menu",
+    "<path transform=\"translate(0 960)\" d=\"M160-240q-17 0-28.5-11.5T120-280q0-17 11.5-28.5T160-320h640q17 0 28.5 11.5T840-280q0 17-11.5 28.5T800-240H160Zm0-200q-17 0-28.5-11.5T120-480q0-17 11.5-28.5T160-520h640q17 0 28.5 11.5T840-480q0 17-11.5 28.5T800-440H160Zm0-200q-17 0-28.5-11.5T120-680q0-17 11.5-28.5T160-720h640q17 0 28.5 11.5T840-680q0 17-11.5 28.5T800-640H160Z\"/>",
+);
+static MORE: Icon = filled(
+    "more",
+    "<path transform=\"translate(0 960)\" d=\"M240-400q-33 0-56.5-23.5T160-480q0-33 23.5-56.5T240-560q33 0 56.5 23.5T320-480q0 33-23.5 56.5T240-400Zm240 0q-33 0-56.5-23.5T400-480q0-33 23.5-56.5T480-560q33 0 56.5 23.5T560-480q0 33-23.5 56.5T480-400Zm240 0q-33 0-56.5-23.5T640-480q0-33 23.5-56.5T720-560q33 0 56.5 23.5T800-480q0 33-23.5 56.5T720-400Z\"/>",
+);
+static UNDO: Icon = filled(
+    "undo",
+    "<path transform=\"translate(0 960)\" d=\"M320-200q-17 0-28.5-11.5T280-240q0-17 11.5-28.5T320-280h244q63 0 109.5-40T720-420q0-60-46.5-100T564-560H312l76 76q11 11 11 28t-11 28q-11 11-28 11t-28-11L188-572q-6-6-8.5-13t-2.5-15q0-8 2.5-15t8.5-13l144-144q11-11 28-11t28 11q11 11 11 28t-11 28l-76 76h252q97 0 166.5 63T800-420q0 94-69.5 157T564-200H320Z\"/>",
+);
+static REDO: Icon = filled(
+    "redo",
+    "<path transform=\"translate(0 960)\" d=\"M648-560H396q-63 0-109.5 40T240-420q0 60 46.5 100T396-280h244q17 0 28.5 11.5T680-240q0 17-11.5 28.5T640-200H396q-97 0-166.5-63T160-420q0-94 69.5-157T396-640h252l-76-76q-11-11-11-28t11-28q11-11 28-11t28 11l144 144q6 6 8.5 13t2.5 15q0 8-2.5 15t-8.5 13L628-428q-11 11-28 11t-28-11q-11-11-11-28t11-28l76-76Z\"/>",
+);
+static SETTINGS: Icon = filled(
+    "settings",
+    "<path transform=\"translate(0 960)\" d=\"M433-80q-27 0-46.5-18T363-142l-9-66q-13-5-24.5-12T307-235l-62 26q-25 11-50 2t-39-32l-47-82q-14-23-8-49t27-43l53-40q-1-7-1-13.5v-27q0-6.5 1-13.5l-53-40q-21-17-27-43t8-49l47-82q14-23 39-32t50 2l62 26q11-8 23-15t24-12l9-66q4-26 23.5-44t46.5-18h94q27 0 46.5 18t23.5 44l9 66q13 5 24.5 12t22.5 15l62-26q25-11 50-2t39 32l47 82q14 23 8 49t-27 43l-53 40q1 7 1 13.5v27q0 6.5-2 13.5l53 40q21 17 27 43t-8 49l-48 82q-14 23-39 32t-50-2l-60-26q-11 8-23 15t-24 12l-9 66q-4 26-23.5 44T527-80h-94Zm49-260q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Z\"/>",
+);
+static MAP: Icon = filled(
+    "map",
+    "<path transform=\"translate(0 960)\" d=\"m574-129-214-75-186 72q-10 4-19.5 2.5T137-136q-8-5-12.5-13.5T120-169v-561q0-13 7.5-23t20.5-15l186-63q6-2 12.5-3t13.5-1q7 0 13.5 1t12.5 3l214 75 186-72q10-4 19.5-2.5T823-824q8 5 12.5 13.5T840-791v561q0 13-7.5 23T812-192l-186 63q-6 2-12.5 3t-13.5 1q-7 0-13.5-1t-12.5-3Zm-14-89v-468l-160-56v468l160 56Z\"/>",
+);
+static HELP: Icon = filled(
+    "help",
+    "<path transform=\"translate(0 960)\" d=\"M478-240q21 0 35.5-14.5T528-290q0-21-14.5-35.5T478-340q-21 0-35.5 14.5T428-290q0 21 14.5 35.5T478-240Zm2 160q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm4-572q25 0 43.5 16t18.5 40q0 22-13.5 39T502-525q-23 20-40.5 44T444-427q0 14 10.5 23.5T479-394q15 0 25.5-10t13.5-25q4-21 18-37.5t30-31.5q23-22 39.5-48t16.5-58q0-51-41.5-83.5T484-720q-38 0-72.5 16T359-655q-7 12-4.5 25.5T368-609q14 8 29 5t25-17q11-15 27.5-23t34.5-8Z\"/>",
+);
+static CLOSE: Icon = filled(
+    "close",
+    "<path transform=\"translate(0 960)\" d=\"M480-424 284-228q-11 11-28 11t-28-11q-11-11-11-28t11-28l196-196-196-196q-11-11-11-28t11-28q11-11 28-11t28 11l196 196 196-196q11-11 28-11t28 11q11 11 11 28t-11 28L536-480l196 196q11 11 11 28t-11 28q-11 11-28 11t-28-11L480-424Z\"/>",
+);
+static ADD: Icon = filled(
+    "add",
+    "<path transform=\"translate(0 960)\" d=\"M440-440H240q-17 0-28.5-11.5T200-480q0-17 11.5-28.5T240-520h200v-200q0-17 11.5-28.5T480-760q17 0 28.5 11.5T520-720v200h200q17 0 28.5 11.5T760-480q0 17-11.5 28.5T720-440H520v200q0 17-11.5 28.5T480-200q-17 0-28.5-11.5T440-240v-200Z\"/>",
+);
+static REMOVE: Icon = filled(
+    "remove",
+    "<path transform=\"translate(0 960)\" d=\"M240-440q-17 0-28.5-11.5T200-480q0-17 11.5-28.5T240-520h480q17 0 28.5 11.5T760-480q0 17-11.5 28.5T720-440H240Z\"/>",
+);
+static CHECK: Icon = filled(
+    "check",
+    "<path transform=\"translate(0 960)\" d=\"m382-354 339-339q12-12 28-12t28 12q12 12 12 28.5T777-636L410-268q-12 12-28 12t-28-12L182-440q-12-12-11.5-28.5T183-497q12-12 28.5-12t28.5 12l142 143Z\"/>",
+);
+static DOWNLOAD: Icon = filled(
+    "download",
+    "<path transform=\"translate(0 960)\" d=\"M480-337q-8 0-15-2.5t-13-8.5L308-492q-12-12-11.5-28t11.5-28q12-12 28.5-12.5T365-549l75 75v-286q0-17 11.5-28.5T480-800q17 0 28.5 11.5T520-760v286l75-75q12-12 28.5-11.5T652-548q11 12 11.5 28T652-492L508-348q-6 6-13 8.5t-15 2.5ZM240-160q-33 0-56.5-23.5T160-240v-80q0-17 11.5-28.5T200-360q17 0 28.5 11.5T240-320v80h480v-80q0-17 11.5-28.5T760-360q17 0 28.5 11.5T800-320v80q0 33-23.5 56.5T720-160H240Z\"/>",
+);
+static SPARKLES: Icon = Icon {
+    name: "sparkles",
+    view: 24.0,
+    body: "<path d=\"M19 8.3q-.125 0-.262-.075Q18.6 8.15 18.55 8l-.8-1.75-1.75-.8q-.15-.05-.225-.188Q15.7 5.125 15.7 5t.075-.263Q15.85 4.6 16 4.55l1.75-.8.8-1.75q.05-.15.188-.225.137-.075.262-.075t.263.075q.137.075.187.225l.8 1.75 1.75.8q.15.05.225.187.075.138.075.263t-.075.262Q22.15 5.4 22 5.45l-1.75.8-.8 1.75q-.05.15-.187.225-.138.075-.263.075Zm0 14q-.125 0-.262-.075-.138-.075-.188-.225l-.8-1.75-1.75-.8q-.15-.05-.225-.188-.075-.137-.075-.262t.075-.262q.075-.138.225-.188l1.75-.8.8-1.75q.05-.15.188-.225.137-.075.262-.075t.263.075q.137.075.187.225l.8 1.75 1.75.8q.15.05.225.188.075.137.075.262t-.075.262q-.075.138-.225.188l-1.75.8-.8 1.75q-.05.15-.187.225-.138.075-.263.075ZM9 18.575q-.275 0-.525-.15T8.1 18l-1.6-3.5L3 12.9q-.275-.125-.425-.375-.15-.25-.15-.525t.15-.525q.15-.25.425-.375l3.5-1.6L8.1 6q.125-.275.375-.425.25-.15.525-.15t.525.15q.25.15.375.425l1.6 3.5 3.5 1.6q.275.125.425.375.15.25.15.525t-.15.525q-.15.25-.425.375l-3.5 1.6L9.9 18q-.125.275-.375.425-.25.15-.525.15Z\"/>",
+};
 
 /// The icon named `name` in `ink`, laid out at `size` points square. Panics on an icon that is
 /// not vendored, so a typo fails loudly in development instead of drawing an empty box.
 pub fn icon(name: &str, size: f32, ink: Color) -> El {
     // The surrounding control carries the accessible name; the glyph itself is decoration.
-    canvas(shape(name, size, ink)).size(size, size).role("none")
+    rune::icon(named(name), size).color(ink).role("none")
 }
 
-fn shape(name: &str, size: f32, ink: Color) -> Shape {
-    let def = ICONS
-        .iter()
-        .find(|def| def.name == name)
-        .unwrap_or_else(|| panic!("icon {name:?} is not vendored"));
-    // `Shape::view_box` scales the geometry but keeps stroke widths in points, so scale Lucide's
-    // 2-unit stroke to the requested size here.
-    let stroke = STROKE * size / VIEW_BOX;
-    let mut shape = Shape::new().view_box(VIEW_BOX, VIEW_BOX);
-    for d in def.paths {
-        shape = shape.stroke_path(&parse_path(d), stroke, LineCap::Round, ink);
-    }
-    shape
-}
-
-/// Parses an SVG path into Rune's flattened line/cubic model. Every SVG path command is
-/// supported (`M L H V C S Q T A Z`, absolute and relative); quadratics become equivalent cubics
-/// and elliptical arcs become cubic segments of at most a quarter turn.
-fn parse_path(d: &str) -> Path {
-    let mut parser = Parser {
-        bytes: d.as_bytes(),
-        offset: 0,
-    };
-    let mut path = Path::new();
-    let mut current = [0.0f32; 2];
-    let mut start = [0.0f32; 2];
-    let mut last_cubic = [0.0f32; 2];
-    let mut last_quad = [0.0f32; 2];
-    let mut previous = None;
-    let mut ran = b' ';
-
-    loop {
-        parser.skip_separators();
-        if parser.offset >= parser.bytes.len() {
-            break;
-        }
-        let command = if parser.bytes[parser.offset].is_ascii_alphabetic() {
-            let command = parser.bytes[parser.offset];
-            parser.offset += 1;
-            previous = Some(command);
-            command
-        } else {
-            // A command may repeat its parameters without repeating the letter. After `M` the
-            // implicit command is `L`, as SVG specifies.
-            match previous {
-                Some(command) => command,
-                None => break,
-            }
-        };
-        let relative = command.is_ascii_lowercase();
-        let was_cubic = matches!(ran, b'C' | b'c' | b'S' | b's');
-        let was_quad = matches!(ran, b'Q' | b'q' | b'T' | b't');
-
-        match command.to_ascii_uppercase() {
-            b'M' => {
-                let mut point = [parser.number(), parser.number()];
-                if relative {
-                    point = add(point, current);
-                }
-                current = point;
-                start = point;
-                path = path.move_to(point);
-                previous = Some(if relative { b'l' } else { b'L' });
-            }
-            b'L' => {
-                let mut point = [parser.number(), parser.number()];
-                if relative {
-                    point = add(point, current);
-                }
-                current = point;
-                path = path.line_to(point);
-            }
-            b'H' => {
-                let x = parser.number();
-                current[0] = if relative { current[0] + x } else { x };
-                path = path.line_to(current);
-            }
-            b'V' => {
-                let y = parser.number();
-                current[1] = if relative { current[1] + y } else { y };
-                path = path.line_to(current);
-            }
-            b'C' => {
-                let mut c1 = [parser.number(), parser.number()];
-                let mut c2 = [parser.number(), parser.number()];
-                let mut end = [parser.number(), parser.number()];
-                if relative {
-                    c1 = add(c1, current);
-                    c2 = add(c2, current);
-                    end = add(end, current);
-                }
-                path = path.cubic_to(c1, c2, end);
-                current = end;
-                last_cubic = c2;
-            }
-            b'S' => {
-                let mut c2 = [parser.number(), parser.number()];
-                let mut end = [parser.number(), parser.number()];
-                if relative {
-                    c2 = add(c2, current);
-                    end = add(end, current);
-                }
-                let c1 = if was_cubic {
-                    reflect(last_cubic, current)
-                } else {
-                    current
-                };
-                path = path.cubic_to(c1, c2, end);
-                current = end;
-                last_cubic = c2;
-            }
-            b'Q' => {
-                let mut control = [parser.number(), parser.number()];
-                let mut end = [parser.number(), parser.number()];
-                if relative {
-                    control = add(control, current);
-                    end = add(end, current);
-                }
-                path = path.cubic_to(
-                    quad_control(current, control),
-                    quad_control(end, control),
-                    end,
-                );
-                current = end;
-                last_quad = control;
-            }
-            b'T' => {
-                let mut end = [parser.number(), parser.number()];
-                if relative {
-                    end = add(end, current);
-                }
-                let control = if was_quad {
-                    reflect(last_quad, current)
-                } else {
-                    current
-                };
-                path = path.cubic_to(
-                    quad_control(current, control),
-                    quad_control(end, control),
-                    end,
-                );
-                current = end;
-                last_quad = control;
-            }
-            b'A' => {
-                let rx = parser.number();
-                let ry = parser.number();
-                let rotation = parser.number();
-                let large = parser.flag();
-                let sweep = parser.flag();
-                let mut end = [parser.number(), parser.number()];
-                if relative {
-                    end = add(end, current);
-                }
-                let cubics = arc_cubics(current, rx, ry, rotation, large, sweep, end);
-                if cubics.is_empty() {
-                    // A zero radius or a zero-length arc is a straight line, as SVG specifies.
-                    if end != current {
-                        path = path.line_to(end);
-                    }
-                } else {
-                    for (c1, c2, point) in cubics {
-                        path = path.cubic_to(c1, c2, point);
-                    }
-                }
-                current = end;
-            }
-            b'Z' => {
-                path = path.close();
-                current = start;
-                previous = None;
-            }
-            other => panic!("unsupported SVG path command {:?}", other as char),
-        }
-        ran = command;
-    }
-    path
-}
-
-fn add(a: [f32; 2], b: [f32; 2]) -> [f32; 2] {
-    [a[0] + b[0], a[1] + b[1]]
-}
-
-/// A dropped cubic or quadratic control point, mirrored through `current`.
-fn reflect(control: [f32; 2], current: [f32; 2]) -> [f32; 2] {
-    [2.0 * current[0] - control[0], 2.0 * current[1] - control[1]]
-}
-
-/// The cubic control point that turns a quadratic control point into the equivalent cubic.
-fn quad_control(end: [f32; 2], control: [f32; 2]) -> [f32; 2] {
-    [
-        end[0] + 2.0 / 3.0 * (control[0] - end[0]),
-        end[1] + 2.0 / 3.0 * (control[1] - end[1]),
-    ]
-}
-
-/// Converts an SVG elliptical arc to cubic Bézier segments. Returns an empty list for a
-/// zero-radius or zero-length arc; the caller then draws a straight line if needed.
-fn arc_cubics(
-    from: [f32; 2],
-    mut rx: f32,
-    mut ry: f32,
-    rotation_degrees: f32,
-    large: bool,
-    sweep: bool,
-    to: [f32; 2],
-) -> Vec<([f32; 2], [f32; 2], [f32; 2])> {
-    if from == to {
-        return Vec::new();
-    }
-    rx = rx.abs();
-    ry = ry.abs();
-    if rx == 0.0 || ry == 0.0 {
-        return Vec::new();
-    }
-
-    let phi = rotation_degrees.to_radians();
-    let (sin_phi, cos_phi) = phi.sin_cos();
-    let dx = (from[0] - to[0]) / 2.0;
-    let dy = (from[1] - to[1]) / 2.0;
-    let x1 = cos_phi * dx + sin_phi * dy;
-    let y1 = -sin_phi * dx + cos_phi * dy;
-
-    // Scale up radii too small to span the chord (SVG implementation notes F.6.6).
-    let lambda = x1 * x1 / (rx * rx) + y1 * y1 / (ry * ry);
-    if lambda > 1.0 {
-        let scale = lambda.sqrt();
-        rx *= scale;
-        ry *= scale;
-    }
-
-    let rx2 = rx * rx;
-    let ry2 = ry * ry;
-    let numerator = (rx2 * ry2 - rx2 * y1 * y1 - ry2 * x1 * x1).max(0.0);
-    let denominator = rx2 * y1 * y1 + ry2 * x1 * x1;
-    let sign = if large == sweep { -1.0 } else { 1.0 };
-    let coefficient = if denominator == 0.0 {
-        0.0
-    } else {
-        sign * (numerator / denominator).sqrt()
-    };
-    let cxp = coefficient * rx * y1 / ry;
-    let cyp = -coefficient * ry * x1 / rx;
-    let cx = cos_phi * cxp - sin_phi * cyp + (from[0] + to[0]) / 2.0;
-    let cy = sin_phi * cxp + cos_phi * cyp + (from[1] + to[1]) / 2.0;
-
-    let ux = (x1 - cxp) / rx;
-    let uy = (y1 - cyp) / ry;
-    let vx = (-x1 - cxp) / rx;
-    let vy = (-y1 - cyp) / ry;
-    let start_angle = uy.atan2(ux);
-    let mut sweep_angle = (ux * vy - uy * vx).atan2(ux * vx + uy * vy);
-    if !sweep && sweep_angle > 0.0 {
-        sweep_angle -= std::f32::consts::TAU;
-    } else if sweep && sweep_angle < 0.0 {
-        sweep_angle += std::f32::consts::TAU;
-    }
-
-    let count = (sweep_angle.abs() / std::f32::consts::FRAC_PI_2)
-        .ceil()
-        .max(1.0) as usize;
-    let step = sweep_angle / count as f32;
-    let ellipse = Ellipse {
-        center: [cx, cy],
-        radii: [rx, ry],
-        sin_phi,
-        cos_phi,
-    };
-    let mut angle = start_angle;
-    let mut out = Vec::with_capacity(count);
-    for _ in 0..count {
-        let next = angle + step;
-        let (sin0, cos0) = angle.sin_cos();
-        let (sin1, cos1) = next.sin_cos();
-        let p0 = ellipse.point(cos0, sin0);
-        let p1 = ellipse.point(cos1, sin1);
-        let d0 = ellipse.derivative(cos0, sin0);
-        let d1 = ellipse.derivative(cos1, sin1);
-        let alpha = 4.0 / 3.0 * (step / 4.0).tan();
-        out.push((
-            [p0[0] + alpha * d0[0], p0[1] + alpha * d0[1]],
-            [p1[0] - alpha * d1[0], p1[1] - alpha * d1[1]],
-            p1,
-        ));
-        angle = next;
-    }
-    out
-}
-
-struct Ellipse {
-    center: [f32; 2],
-    radii: [f32; 2],
-    sin_phi: f32,
-    cos_phi: f32,
-}
-
-impl Ellipse {
-    fn point(&self, cos_t: f32, sin_t: f32) -> [f32; 2] {
-        let [cx, cy] = self.center;
-        let [rx, ry] = self.radii;
-        [
-            cx + self.cos_phi * rx * cos_t - self.sin_phi * ry * sin_t,
-            cy + self.sin_phi * rx * cos_t + self.cos_phi * ry * sin_t,
-        ]
-    }
-
-    fn derivative(&self, cos_t: f32, sin_t: f32) -> [f32; 2] {
-        let [rx, ry] = self.radii;
-        [
-            -self.cos_phi * rx * sin_t - self.sin_phi * ry * cos_t,
-            -self.sin_phi * rx * sin_t + self.cos_phi * ry * cos_t,
-        ]
-    }
-}
-
-struct Parser<'a> {
-    bytes: &'a [u8],
-    offset: usize,
-}
-
-impl Parser<'_> {
-    fn peek(&self) -> Option<u8> {
-        self.bytes.get(self.offset).copied()
-    }
-
-    fn skip_separators(&mut self) {
-        while let Some(byte) = self.peek() {
-            if matches!(byte, b' ' | b'\t' | b'\r' | b'\n' | b',') {
-                self.offset += 1;
-            } else {
-                break;
-            }
-        }
-    }
-
-    /// Reads one SVG number: optional sign, digits, optional fraction and exponent. Adjacent
-    /// numbers need no separator (`M.5.5`, `m5-3`), so the scan stops at the second `.` or a
-    /// sign that starts the next number.
-    fn number(&mut self) -> f32 {
-        self.skip_separators();
-        let start = self.offset;
-        if matches!(self.peek(), Some(b'+' | b'-')) {
-            self.offset += 1;
-        }
-        let mut digits = false;
-        while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
-            self.offset += 1;
-            digits = true;
-        }
-        if self.peek() == Some(b'.') {
-            self.offset += 1;
-            while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
-                self.offset += 1;
-                digits = true;
-            }
-        }
-        if digits && matches!(self.peek(), Some(b'e' | b'E')) {
-            let before_exponent = self.offset;
-            self.offset += 1;
-            if matches!(self.peek(), Some(b'+' | b'-')) {
-                self.offset += 1;
-            }
-            let mut exponent_digits = false;
-            while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
-                self.offset += 1;
-                exponent_digits = true;
-            }
-            if !exponent_digits {
-                self.offset = before_exponent;
-            }
-        }
-        let text = std::str::from_utf8(&self.bytes[start..self.offset])
-            .expect("path data is UTF-8")
-            .trim();
-        text.parse()
-            .unwrap_or_else(|_| panic!("malformed number {text:?} in icon path"))
-    }
-
-    /// Reads an arc flag. Flags can be packed without separators (`0 01 20` is large=0,
-    /// sweep=1, x=20), so read a single `0`/`1` byte rather than a number.
-    fn flag(&mut self) -> bool {
-        self.skip_separators();
-        match self.peek() {
-            Some(b'0') => {
-                self.offset += 1;
-                false
-            }
-            Some(b'1') => {
-                self.offset += 1;
-                true
-            }
-            _ => self.number() != 0.0,
-        }
+fn named(name: &str) -> &'static Icon {
+    match name {
+        "hand" => &HAND,
+        "pointer" => &POINTER,
+        "rectangle" => &RECTANGLE,
+        "diamond" => &DIAMOND,
+        "circle" => &CIRCLE,
+        "arrow" => &ARROW,
+        "line" => &LINE,
+        "pen" => &PEN,
+        "text" => &TEXT,
+        "sticky" => &STICKY,
+        "eraser" => &ERASER,
+        "lock" => &LOCK,
+        "menu" => &MENU,
+        "more" => &MORE,
+        "undo" => &UNDO,
+        "redo" => &REDO,
+        "settings" => &SETTINGS,
+        "map" => &MAP,
+        "help" => &HELP,
+        "close" => &CLOSE,
+        "add" => &ADD,
+        "remove" => &REMOVE,
+        "check" => &CHECK,
+        "download" => &DOWNLOAD,
+        "sparkles" => &SPARKLES,
+        other => panic!("icon {other:?} is not vendored"),
     }
 }
 
@@ -562,87 +166,111 @@ mod tests {
     use super::*;
 
     const EXPECTED: &[&str] = &[
-        "arrow-right",
-        "book-open",
-        "circle",
-        "circle-question-mark",
-        "diamond",
-        "ellipsis-vertical",
-        "eraser",
         "hand",
+        "pointer",
+        "rectangle",
+        "diamond",
+        "circle",
+        "arrow",
+        "line",
+        "pen",
+        "text",
+        "sticky",
+        "eraser",
         "lock",
+        "menu",
+        "more",
+        "undo",
+        "redo",
+        "settings",
         "map",
-        "minus",
-        "mouse-pointer-2",
-        "pencil",
-        "redo-2",
-        "square",
-        "sticky-note",
-        "type",
-        "undo-2",
-        "x",
+        "help",
+        "close",
+        "add",
+        "remove",
+        "check",
+        "download",
+        "sparkles",
     ];
 
     #[test]
-    fn every_expected_icon_is_vendored() {
+    fn every_expected_icon_renders_a_glyph() {
         for name in EXPECTED {
+            let coverage = rune::text::icon_coverage(named(name), 24);
             assert!(
-                ICONS.iter().any(|def| def.name == *name),
-                "{name} has no vendored path data"
+                coverage.iter().any(|&c| c != 0),
+                "{name} produced no coverage"
             );
         }
     }
 
     #[test]
-    fn every_icon_parses_to_a_non_empty_shape() {
-        for name in EXPECTED {
-            let shape = shape(name, 16.0, Color::WHITE);
-            assert!(!shape.is_empty(), "{name} produced no strokes");
-        }
+    fn unknown_icons_panic_in_development() {
+        let panicked = std::panic::catch_unwind(|| named("not-an-icon"));
+        assert!(panicked.is_err());
     }
 
+    /// Repaints `assets/cursors/{pen,sticky-note}.png` from the same Material glyphs the toolbar
+    /// draws, so the cursor and its tool button can never drift apart. Run with
+    /// `cargo test -p doodle-app-rune regenerate_cursor_pngs -- --ignored`.
     #[test]
-    fn icon_coordinates_are_finite() {
-        for def in ICONS {
-            for d in def.paths {
-                let debug = format!("{:?}", parse_path(d));
-                assert!(!debug.contains("NaN"), "{} produced NaN", def.name);
-                assert!(
-                    !debug.contains("inf"),
-                    "{} produced an infinite coordinate",
-                    def.name
+    #[ignore = "writes the checked-in cursor assets"]
+    fn regenerate_cursor_pngs() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/cursors");
+        write_cursor(&dir.join("pen.png"), named("pen"));
+        write_cursor(&dir.join("sticky-note.png"), named("sticky"));
+    }
+
+    /// 64×64 RGBA at 2x: the glyph at 52px centred in a 6px margin, dark ink over a 2px white
+    /// halo so it reads on both the dark board and a pale note.
+    fn write_cursor(path: &std::path::Path, icon: &Icon) {
+        const BOX: u32 = 64;
+        const GLYPH: u32 = 52;
+        const OFFSET: u32 = 6;
+        let coverage = rune::text::icon_coverage(icon, GLYPH);
+        let mut alpha = vec![0u8; (BOX * BOX) as usize];
+        for y in 0..GLYPH {
+            for x in 0..GLYPH {
+                alpha[((y + OFFSET) * BOX + x + OFFSET) as usize] =
+                    coverage[(y * GLYPH + x) as usize];
+            }
+        }
+        let mut halo = alpha.clone();
+        for y in 0..BOX {
+            for x in 0..BOX {
+                let mut peak = 0u8;
+                for dy in -2i32..=2 {
+                    for dx in -2i32..=2 {
+                        let nx = x as i32 + dx;
+                        let ny = y as i32 + dy;
+                        if (0..BOX as i32).contains(&nx) && (0..BOX as i32).contains(&ny) {
+                            peak = peak.max(alpha[(ny as u32 * BOX + nx as u32) as usize]);
+                        }
+                    }
+                }
+                halo[(y * BOX + x) as usize] = peak;
+            }
+        }
+        let mut image = image::RgbaImage::new(BOX, BOX);
+        for y in 0..BOX {
+            for x in 0..BOX {
+                let cov = f32::from(alpha[(y * BOX + x) as usize]) / 255.0;
+                let wht = f32::from(halo[(y * BOX + x) as usize]) / 255.0;
+                let out_a = (cov + wht * (1.0 - cov)).clamp(0.0, 1.0);
+                if out_a <= 0.0 {
+                    continue;
+                }
+                let ink = 26.0f32;
+                let white = 255.0f32;
+                let channel = (ink * cov + white * wht * (1.0 - cov)) / out_a;
+                let level = channel.clamp(0.0, 255.0) as u8;
+                image.put_pixel(
+                    x,
+                    y,
+                    image::Rgba([level, level, level, (out_a * 255.0) as u8]),
                 );
             }
         }
-    }
-
-    #[test]
-    fn path_commands_convert_to_cubics() {
-        // Arc-only circle, a quadratic with smooth continuation, a cubic with smooth
-        // continuation, and a relative L/H/V/Z path.
-        for d in [
-            "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0",
-            "M0 0q5 10 10 0t10 0",
-            "M0 0c1 2 3 4 5 6s7 8 9 10",
-            "M1 1h8v8H1z",
-        ] {
-            let path = parse_path(d);
-            let shape = Shape::new().stroke_path(&path, 1.0, LineCap::Round, Color::WHITE);
-            assert!(!shape.is_empty(), "{d} produced no strokes");
-        }
-    }
-
-    #[test]
-    fn arcs_scale_radii_too_small_for_the_chord() {
-        // rx/ry cannot span the endpoints; the conversion must scale them up, not fold.
-        let path = parse_path("M0 0A1 1 0 0 0 10 0");
-        let debug = format!("{path:?}");
-        assert!(!debug.contains("NaN"), "corrected arc produced NaN");
-        assert!(
-            !Shape::new()
-                .stroke_path(&path, 1.0, LineCap::Round, Color::WHITE)
-                .is_empty(),
-            "corrected arc produced no strokes"
-        );
+        image.save(path).expect("cursor png writes");
     }
 }

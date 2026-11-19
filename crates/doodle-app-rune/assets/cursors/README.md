@@ -1,13 +1,17 @@
 # Board cursors
 
-Original assets drawn for Doodleverse. Each is a 64x64 RGBA PNG with a transparent
-background, drawn at 2x so Rune shows it as a 32x32 pt cursor. Shapes are dark ink
-(`#1c1a20`) over a white halo, so they read on both light and dark boards.
+Rendered from the app's own Material Symbols Rounded glyphs (Apache-2.0, licence in
+`../icons/LICENSE-material-symbols.txt`), so the cursor and its toolbar button stay the same
+shape. Each is a 64x64 RGBA PNG at 2x, shown as a 32x32 pt cursor: dark ink over a 2px white
+halo, readable on both the dark board and a pale note.
 
-| File | Shape | Hot spot (pt) |
+| File | Glyph | Hot spot (pt) |
 | --- | --- | --- |
-| `pen.png` | Fountain-pen nib pointing down-left, barrel up-right | `[4.5, 27.5]`, the nib tip |
-| `sticky-note.png` | Square note with a folded bottom-right corner and two ruled lines | `[3, 3]`, the note's top-left corner |
+| `pen.png` | `pen` | `[7.5, 24.5]`, the tip |
+| `sticky-note.png` | `sticky` | `[6.3, 6.3]`, the note's top-left corner |
 
-Regenerate with the script kept in `scratch/gen_cursors.py` (untracked); the PNGs are the
-source of truth.
+The PNGs are the source of truth. Regenerate them from the glyphs with:
+
+```sh
+cargo test -p doodle-app-rune regenerate_cursor_pngs -- --ignored
+```

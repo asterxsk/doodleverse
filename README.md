@@ -37,8 +37,10 @@ as a second front end over the same core.
 - **coss ui chrome.** A tool-only centred icon toolbar with key badges and a lock that pins it,
   a board menu top left, a three-dot menu top right, a floating left panel for the active
   drawing tool, and a bottom-left cluster holding zoom, canvas settings, the minimap and
-  undo/redo. Light and dark are real token sets, not inversions; surfaces use radius 10 and
-  controls radius 8. Icons are [Lucide](https://lucide.dev) (ISC).
+  undo/redo. Dark chrome is the default and light remains available from Canvas settings;
+  both are real token sets, not inversions. Surfaces use radius 10 and controls radius 8,
+  popups and panels enter with coss's scale-and-fade motion, and tool icons are
+  [Material Symbols Rounded](https://fonts.google.com/icons) (Apache-2.0).
 - **Portable files.** `.doodleverse` export uses a versioned envelope with CRC validation.
   Import validates the whole payload, remaps every identity, and places the board at the
   origin (empty canvas) or as a validated ghost preview (non-empty canvas).
@@ -154,5 +156,8 @@ pointer pressure inside the app window.
 
 ## License
 
-MIT OR Apache-2.0. UI icons are from [Lucide](https://lucide.dev) under the ISC licence; the
-notice and the vendored SVGs live in `assets/icons/`.
+MIT OR Apache-2.0. UI icons are from Google's
+[Material Symbols Rounded](https://fonts.google.com/icons) under the Apache-2.0 licence; the
+notice and exact revisions are recorded in
+`crates/doodle-app-rune/assets/icons/LICENSE-material-symbols.txt` and
+`docs/plans/icon-selection.md`.

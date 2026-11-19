@@ -307,14 +307,19 @@ impl DoodleApp {
             selection: BTreeSet::new(),
             tool: Tool::Draw,
             brush: BrushSettings::default(),
-            color: [32, 30, 35, 255],
+            // Dark chrome is the default; light remains available from Canvas settings.
+            color: [238, 234, 227, 255],
             opacity: 1.0,
             fill_rgba: [0, 0, 0, 0],
             fill_style: FillStyle::default(),
             note_rgba: [255, 241, 186, 255],
             pressure_enabled: true,
-            grid: GridSettings::default(),
-            light_theme: true,
+            grid: GridSettings {
+                background_rgba: [22, 22, 22, 255],
+                line_rgba: [82, 82, 82, 255],
+                ..GridSettings::default()
+            },
+            light_theme: false,
             reduced_motion: false,
             stroke: None,
             drag: None,

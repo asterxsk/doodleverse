@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use doodle_render::grid_frame;
 use doodle_types::{
     FillStyle, ObjectKind, Point, Pose, Rect, ShapeKind, ShapeObject, StatementKind, StrokeGeometry,
@@ -29,12 +27,14 @@ const GRID_MARK_CAP: usize = 4_000;
 const GRID_HIDE_BELOW: f64 = 0.02;
 const GRID_FADE_END: f64 = 0.05;
 
-/// The pen and sticky-note cursors: 64x64 PNGs at 2x, dark ink with a white halo.
+/// The pen and sticky-note cursors: 64x64 PNGs at 2x, rendered from the same Material Symbols
+/// glyphs as the toolbar (`icons::regenerate_cursor_pngs`), dark ink with a white halo. The
+/// hotspot sits on the glyph's writing tip and the note's top-left corner.
 const PEN_CURSOR: CursorImage =
-    CursorImage::png(include_bytes!("../assets/cursors/pen.png"), [4.5, 27.5]);
+    CursorImage::png(include_bytes!("../assets/cursors/pen.png"), [7.5, 24.5]);
 const STICKY_CURSOR: CursorImage = CursorImage::png(
     include_bytes!("../assets/cursors/sticky-note.png"),
-    [3.0, 3.0],
+    [6.3, 6.3],
 );
 
 fn s_color(rgba: [u8; 4]) -> Color {
@@ -289,46 +289,152 @@ fn draw_stroke(
             return;
         }
         *budget -= 1;
-        let mut path = Path::new();
-        for index in 0..14 {
-            let angle = std::f32::consts::TAU * index as f32 / 14.0;
-            let at = [
-                points[0].0[0] + angle.cos() * points[0].1 * 0.5,
-                points[0].0[1] + angle.sin() * points[0].1 * 0.5,
-            ];
-            path = if index == 0 {
-                path.move_to(at)
-            } else {
-                path.line_to(at)
-            };
-        }
-        *shape = std::mem::take(shape).fill_path(&path.close(), color);
+        fill_disc(shape, points[0].0, points[0].1, color);
         return;
     }
-    // Quantize the per-segment width into half-point buckets; each bucket becomes one path
-    // stroked once at the end. Cost is linear in the samples plus a small fixed bucket count.
-    let mut buckets: BTreeMap<u32, Path> = BTreeMap::new();
-    for pair in points.windows(2) {
+    // Zoomed far out every measured width lands under one screen point. The ribbon outline then
+    // paints a sub-pixel band whose edge staircase reads as pixelation. At that size the taper
+    // is invisible anyway, so the stroke drops to one antialiased capsule polyline, the same
+    // treatment a vector editor gives a scaled-down line; it fades smoothly instead of dithering.
+    if points.iter().all(|(_, width)| *width < 1.0) {
         if *budget == 0 {
             return;
         }
-        let (a, wa) = pair[0];
-        let (b, wb) = pair[1];
-        let width_here = ((wa + wb) * 0.5).max(0.5);
-        if !visible(a, width, height, width_here + 64.0)
-            && !visible(b, width, height, width_here + 64.0)
-        {
-            continue;
+        let mut center: Vec<[f32; 2]> = Vec::with_capacity(points.len());
+        for (at, _) in &points {
+            let keep = center.last().is_none_or(|last| {
+                let dx = at[0] - last[0];
+                let dy = at[1] - last[1];
+                dx * dx + dy * dy >= 0.12
+            });
+            if keep {
+                center.push(*at);
+            }
+        }
+        let last = points[points.len() - 1].0;
+        if center.last() != Some(&last) {
+            center.push(last);
+        }
+        if center.len() < 2 {
+            return;
         }
         *budget -= 1;
-        let key = ((width_here * 2.0).round() as u32).max(1);
-        let path = buckets.remove(&key).unwrap_or_default();
-        buckets.insert(key, path.move_to(a).line_to(b));
+        *shape = std::mem::take(shape).stroke(center, 1.0, color);
+        return;
     }
-    for (key, path) in buckets {
-        let width_here = key as f32 * 0.5;
-        *shape = std::mem::take(shape).stroke_path(&path, width_here, LineCap::Round, color);
+    // Each run is one filled outline whose edges interpolate the measured widths. Stroking
+    // per-segment capsules quantized the width into half-point steps, and the overlapping round
+    // caps showed those steps as a dithered ladder along a speed taper. A single outline keeps
+    // the edge continuous. Sharp corners split the run so the outline never folds on itself.
+    let mut run_start = 0;
+    let mut previous_dir: Option<[f32; 2]> = None;
+    for index in 1..points.len() {
+        let (a, _) = points[index - 1];
+        let (b, _) = points[index];
+        let Some(dir) = normalized_direction(a, b) else {
+            continue;
+        };
+        let sharp = previous_dir.is_some_and(|prev| prev[0] * dir[0] + prev[1] * dir[1] < 0.25);
+        if sharp {
+            emit_stroke_run(
+                shape,
+                &points[run_start..index],
+                color,
+                width,
+                height,
+                budget,
+            );
+            // The split leaves two flat ends at the joint; one disc covers both.
+            if *budget > 0 {
+                *budget -= 1;
+                fill_disc(shape, points[index - 1].0, points[index - 1].1, color);
+            }
+            run_start = index - 1;
+        }
+        previous_dir = Some(dir);
+        if *budget == 0 {
+            return;
+        }
     }
+    emit_stroke_run(shape, &points[run_start..], color, width, height, budget);
+}
+
+fn normalized_direction(a: [f32; 2], b: [f32; 2]) -> Option<[f32; 2]> {
+    let dx = b[0] - a[0];
+    let dy = b[1] - a[1];
+    let length = (dx * dx + dy * dy).sqrt();
+    (length > 0.000_1).then(|| [dx / length, dy / length])
+}
+
+fn fill_disc(shape: &mut Shape, center: [f32; 2], width: f32, color: Color) {
+    let radius = width.max(0.5) * 0.5;
+    let mut path = Path::new();
+    for index in 0..14 {
+        let angle = std::f32::consts::TAU * index as f32 / 14.0;
+        let at = [
+            center[0] + angle.cos() * radius,
+            center[1] + angle.sin() * radius,
+        ];
+        path = if index == 0 {
+            path.move_to(at)
+        } else {
+            path.line_to(at)
+        };
+    }
+    *shape = std::mem::take(shape).fill_path(&path.close(), color);
+}
+
+fn emit_stroke_run(
+    shape: &mut Shape,
+    points: &[([f32; 2], f32)],
+    color: Color,
+    width: f32,
+    height: f32,
+    budget: &mut usize,
+) {
+    if points.len() < 2 || *budget < 3 {
+        return;
+    }
+    let margin = points.iter().map(|(_, w)| *w).fold(0.0, f32::max) + 64.0;
+    if !points
+        .iter()
+        .any(|(at, _)| visible(*at, width, height, margin))
+    {
+        return;
+    }
+    let last = points.len() - 1;
+    let mut left: Vec<[f32; 2]> = Vec::with_capacity(points.len());
+    let mut right: Vec<[f32; 2]> = Vec::with_capacity(points.len());
+    let mut direction = normalized_direction(points[0].0, points[1].0).unwrap_or([1.0, 0.0]);
+    for (index, (at, point_width)) in points.iter().enumerate() {
+        let local = if index == 0 {
+            normalized_direction(points[0].0, points[1].0)
+        } else if index == last {
+            normalized_direction(points[last - 1].0, points[last].0)
+        } else {
+            normalized_direction(points[index - 1].0, points[index + 1].0)
+                .or_else(|| normalized_direction(points[index - 1].0, *at))
+        };
+        if let Some(local) = local {
+            direction = local;
+        }
+        let normal = [-direction[1], direction[0]];
+        let half = point_width.max(0.5) * 0.5;
+        left.push([at[0] + normal[0] * half, at[1] + normal[1] * half]);
+        right.push([at[0] - normal[0] * half, at[1] - normal[1] * half]);
+    }
+    let mut path = Path::new().move_to(left[0]);
+    for at in &left[1..] {
+        path = path.line_to(*at);
+    }
+    for at in right.iter().rev() {
+        path = path.line_to(*at);
+    }
+    // Round caps come from a disc at each end, matching the old stroked look.
+    *budget -= 3;
+    *shape = std::mem::take(shape).fill_path(&path.close(), color);
+    fill_disc(shape, points[0].0, points[0].1, color);
+    fill_disc(shape, points[last].0, points[last].1, color);
 }
 
 fn draw_shape(

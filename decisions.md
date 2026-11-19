@@ -506,8 +506,10 @@ authorized GitHub remote.
 - **Because:** the old mouse path mixed speed with an elapsed-time envelope, so later samples grew
   regardless of pace. The envelope is gone. A responsive speed EMA (alpha 0.35) becomes screen
   points per second via `speed_ema * 0.7 / min_distance` (the builder derives `min_distance` as
-  `0.7 / zoom`), normalized at 300 px/s, and mapped to `1.2 - 0.8 * speed_norm`, clamped
-  `0.4..=1.2`: slow is thick, fast is thin, at every zoom. The default sensitivity is 0.8.
+  `0.7 / zoom`), normalized at 300 px/s, and mapped to `1.6 - 1.3 * speed_norm`, clamped
+  `0.25..=1.6`: slow is thick, fast is thin, at every zoom. The wider range is what makes the
+  taper read at a glance; the first `1.2..0.4` mapping was nearly invisible on the board. The
+  default sensitivity is 0.8.
   `BrushSettings::simulate_pressure` (default true) returns 1.0 for mouse samples when false;
   hardware pen pressure still wins. The left panel's Pressure Off/On switch drives this.
 - **Alternatives:** keep the envelope (wrong direction for the reported feel); make the switch
@@ -551,3 +553,54 @@ authorized GitHub remote.
 - **Reversibility:** cheap — `note_rgba`, `commit_editor` and the statement ink helper.
 - **Risk if wrong:** a very saturated future note tint could read poorly; the luminance threshold
   is the guard and the current six tints all clear it.
+
+### D44 — Dark chrome is the default
+- **Because:** the user tests and prefers dark ("just let's keep it dark mode"), so first launch
+  opens `light_theme: false` with the neutral `#161616` board and `#525252` grid. Light stays a
+  full token set behind the Canvas settings toggle; nothing was removed.
+- **Alternatives:** follow the OS theme (the owner's OS preference is not the app's default);
+  drop light entirely (the token set costs nothing and remains useful for pale boards).
+- **Reversibility:** cheap — one initialiser and the toggle.
+- **Risk if wrong:** a light-theme user must flip one switch; the canvas settings row is visible
+  in the same panel cluster as zoom and undo/redo.
+
+### D45 — Material Symbols Rounded is the only icon source
+- **Because:** the brief asked for professional icons sourced online, not hand-drawn ones. The
+  filled rounded set matches the coss geometric feel, covers every chrome and tool glyph, and
+  Apache-2.0 permits vendoring. Exact upstream path data is stored in `icons.rs` and drawn by
+  Rune's SVG icon engine, which handles fill rules and transforms. Pen and sticky cursors are
+  rasterised from the same glyphs by an ignored test, so cursor and tool button cannot diverge.
+  Licence text: `assets/icons/LICENSE-material-symbols.txt`; selection: `docs/plans/icon-selection.md`.
+- **Alternatives:** Lucide (outline only, thin at 16pt), Phosphor (heavier license bookkeeping),
+  hand-drawn paths (rejected by the brief).
+- **Reversibility:** cheap — swap the statics and regenerate cursors.
+- **Risk if wrong:** the filled set reads bolder than an outline set at 16pt; the toolbar buttons
+  are 32pt and the glyphs sit at 16pt, which the rendered frames showed as balanced.
+
+### D46 — Ink drops to an antialiased polyline when every width is sub-pixel
+- **Because:** the outline-ribbon stroke is exact while its width covers at least a screen pixel.
+  Zoomed far out, widths clamp under 1px and the ribbon's filled edge staircase reads as
+  pixelation (the user's report). When every sampled width is below one point, `draw_stroke`
+  decimates the screen points to half-point spacing and emits one `Shape::stroke` polyline at
+  1pt with round caps, so Rune's antialiased capsule pass fades the line smoothly, the same
+  treatment a vector editor gives a scaled-down line. Taper is invisible at that size.
+- **Alternatives:** MSAA (Rune exposes no sample-count control); rendering the board to an
+  offscreen texture and downscaling (a whole render path for one edge case); leaving the clamp at
+  `0.5` (the reported staircase).
+- **Reversibility:** cheap — one branch in `draw_stroke`.
+- **Risk if wrong:** at the crossover zoom a stroke settles to a uniform 1pt line instead of a
+  tapered one; the crossing happens where the taper is already below a pixel.
+
+### D47 — The chrome follows coss ui component anatomy and motion
+- **Because:** the follow-up brief asked for every UI element to match coss, especially dark mode,
+  with the same smooth animations. Tokens carry coss dark values (`#161616` background, `#1b1b1b`
+  card, 6% border, 8% input, 14/500 button type, radius 10/8/12/16/6); Slider is track h-4,
+  primary indicator, 16pt white thumb with input border and a 1.2 press scale; Switch is an
+  18x30 track with a 16pt thumb and a 150ms spring; Toolbar is a `rounded-xl` card with 32pt
+  buttons and 1px group separators; menus, dialogs and floating panels enter with coss's scale
+  (0.96–0.98) and fade on Rune's `motion::SNAPPY`. Hover/press tokens are 4%/8% alpha overlays.
+- **Alternatives:** keep bespoke chrome (the brief explicitly replaces it); animate with the
+  default fade only (the brief asks for the same animations).
+- **Reversibility:** cheap — `theme.rs` holds every token and component constructor.
+- **Risk if wrong:** Rune's motion curve is not literally coss's CSS easing; it is the closest
+  built-in spring, and reduced motion still disables it.

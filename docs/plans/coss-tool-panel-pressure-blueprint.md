@@ -135,6 +135,11 @@ Component anatomy:
   `22b-light-sticky-panel`, `23b-light-select-no-panel`, `24b-light-shape-panel`,
   `25-light-solid`, `27-light-coral-text`, `28-light-sage-note`, `30-dark-pressure`,
   `31-dark-filled-shape`, `32-dark-pressure-off`.
-- Gate (final revision): fmt check clean, clippy `-D warnings` clean, 99 workspace tests
-  passed, release build finished.
+- Follow-up pass (2026-11-19): coss component anatomy and motion (D47), dark default (D44),
+  Material Symbols icons and rasterised cursors (D45), far-zoom stroke LOD (D46), diamond glyph
+  corrected to a rhombus, sliders/switch/toolbar rebuilt to the coss registry specs. Evidence:
+  `artifacts/blueprint-coss/40-darkcentered.png`, `41-dark-taper.png`, `50-farzoom-aa*.png`,
+  `51-mid/out/far*.png`, `53-toolbar-crop.png`, `54-panel-crop.png`.
+- Gate (final revision): fmt check clean, clippy `-D warnings` clean, 101 workspace tests
+  passed (1 ignored, the cursor regeneration), release build finished.
 - Critic passes: see below.
