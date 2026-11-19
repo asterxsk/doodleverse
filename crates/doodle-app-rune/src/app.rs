@@ -80,6 +80,76 @@ fn initial_window_size() -> [f32; 2] {
     })
 }
 
+/// Which colour row owns the open custom-colour picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColourTarget {
+    Stroke,
+    Fill,
+}
+
+impl DoodleApp {
+    /// Open the picker for `target`, its hex field seeded with the colour the row currently has.
+    pub fn open_picker(&mut self, target: ColourTarget) {
+        let current = match target {
+            ColourTarget::Stroke => self.color,
+            ColourTarget::Fill => self.fill_rgba,
+        };
+        self.picker_hex.replace_text(hex_of(current));
+        self.picker = Some(target);
+    }
+
+    /// Apply the picker's hex field, if it parses, and close the picker.
+    pub fn apply_picker_hex(&mut self) {
+        let Some(target) = self.picker else { return };
+        if let Some(rgba) = parse_hex(&self.picker_hex.text) {
+            self.set_picker_colour(target, rgba);
+        }
+        self.picker = None;
+    }
+
+    /// Set the colour the picker is choosing for and remember it behind the row's last swatch.
+    pub fn set_picker_colour(&mut self, target: ColourTarget, rgba: [u8; 4]) {
+        match target {
+            ColourTarget::Stroke => {
+                self.color = rgba;
+                if rgba[3] > 0 {
+                    self.stroke_custom = rgba;
+                }
+            }
+            ColourTarget::Fill => {
+                self.fill_rgba = rgba;
+                if rgba[3] > 0 {
+                    self.fill_custom = rgba;
+                }
+            }
+        }
+    }
+}
+
+/// `#RRGGBB` for a held colour, the form the picker's field edits and the board stores.
+pub fn hex_of(rgba: [u8; 4]) -> String {
+    format!("#{:02x}{:02x}{:02x}", rgba[0], rgba[1], rgba[2])
+}
+
+/// Parse `#rgb`, `#rrggbb` or the same without `#`. The alpha is kept at 255: opacity is the
+/// panel's own control, and a picker colour that carried alpha would double-apply it.
+pub fn parse_hex(text: &str) -> Option<[u8; 4]> {
+    let digits = text.trim().trim_start_matches('#');
+    let byte = |index: usize| u8::from_str_radix(&digits[index..index + 2], 16).ok();
+    match digits.len() {
+        3 => {
+            let mut out = [255u8; 4];
+            for (index, ch) in digits.chars().enumerate() {
+                let value = ch.to_digit(16)?;
+                out[index] = (value * 17) as u8;
+            }
+            Some(out)
+        }
+        6 => Some([byte(0)?, byte(2)?, byte(4)?, 255]),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
     Draw,
@@ -244,6 +314,13 @@ pub struct DoodleApp {
     pub shape_drag: Option<ShapeDrag>,
     pub editor: Option<InlineEditor>,
     pub editor_edit: rune::TextEdit,
+    /// Which swatch row's custom-colour picker is open, if any.
+    pub picker: Option<ColourTarget>,
+    /// The picker's hex field; its text is parsed on Apply.
+    pub picker_hex: rune::TextEdit,
+    /// The colour behind the Stroke row's last swatch, and the one behind Background's.
+    pub stroke_custom: [u8; 4],
+    pub fill_custom: [u8; 4],
     pub toolbar_locked: bool,
     pub minimap_open: bool,
     pub pending_import: Option<PendingImport>,
@@ -331,6 +408,10 @@ impl DoodleApp {
             shape_drag: None,
             editor: None,
             editor_edit: rune::TextEdit::new(""),
+            picker: None,
+            picker_hex: rune::TextEdit::new(""),
+            stroke_custom: [224, 49, 49, 255],
+            fill_custom: [255, 236, 153, 255],
             toolbar_locked: false,
             minimap_open: false,
             pending_import: None,

@@ -6,7 +6,7 @@ use rune::{
     text, text_input,
 };
 
-use crate::app::{DoodleApp, NoticeKind, Target, Tool};
+use crate::app::{ColourTarget, DoodleApp, NoticeKind, Target, Tool, parse_hex};
 use crate::icons;
 use crate::theme::{self, Palette};
 
@@ -153,6 +153,10 @@ pub fn view(s: &DoodleApp, cx: &mut Cx<DoodleApp>) -> El {
     }
     if s.show_help {
         root = root.child(help_panel(s, &pal));
+    }
+    if s.picker.is_some() {
+        root = root.child(picker_scrim());
+        root = root.child(colour_picker(s, &pal));
     }
 
     // Popovers sit above the islands and the panels so a menu opened near one is never clipped.
@@ -516,6 +520,18 @@ fn tool_settings_panel(s: &DoodleApp, pal: &Palette) -> El {
                     .on_press(move |s: &mut DoodleApp| s.color = rgba),
             );
         }
+        // Excalidraw's last swatch is the way out of the fixed set: it opens the picker, and it
+        // wears whatever colour was chosen there.
+        stroke_row = stroke_row.child(
+            custom_swatch(
+                "tool-swatch-custom",
+                s.stroke_custom,
+                s.color == s.stroke_custom,
+                pal,
+            )
+            .label("Custom colour")
+            .on_press(|s: &mut DoodleApp| s.open_picker(ColourTarget::Stroke)),
+        );
         body = body.child(panel_section(pal, "Stroke", stroke_row));
     }
 
@@ -549,6 +565,16 @@ fn tool_settings_panel(s: &DoodleApp, pal: &Palette) -> El {
             }
             background_row = background_row.child(chip);
         }
+        background_row = background_row.child(
+            custom_swatch(
+                "tool-background-custom",
+                s.fill_custom,
+                s.fill_rgba == s.fill_custom,
+                pal,
+            )
+            .label("Custom background")
+            .on_press(|s: &mut DoodleApp| s.open_picker(ColourTarget::Fill)),
+        );
         body = body.child(panel_section(pal, "Background", background_row));
     }
 
@@ -1523,7 +1549,196 @@ fn enter_activates_tx(
     }
 }
 
-/// A modal: a full-window scrim with the card centred inside it. The root is the dialog; the
+/// The twelve colours the picker offers before the hex field; the same set for ink and for
+/// background, so one picker body serves both rows.
+const PICKER_COLOURS: [[u8; 4]; 12] = [
+    [32, 32, 32, 255],
+    [255, 255, 255, 255],
+    [224, 49, 49, 255],
+    [230, 119, 0, 255],
+    [245, 194, 0, 255],
+    [43, 153, 86, 255],
+    [16, 185, 129, 255],
+    [34, 139, 230, 255],
+    [99, 102, 241, 255],
+    [151, 71, 255, 255],
+    [233, 30, 99, 255],
+    [128, 128, 128, 255],
+];
+
+/// The last swatch in a row: the colour the picker last chose, marked with a plus so it reads as
+/// "choose another" rather than as one more preset. The plus ink flips with the swatch's luma.
+fn custom_swatch(key: impl Into<String>, rgba: [u8; 4], selected: bool, pal: &Palette) -> El {
+    let luma =
+        0.2126 * f32::from(rgba[0]) + 0.7152 * f32::from(rgba[1]) + 0.0722 * f32::from(rgba[2]);
+    let ink = if luma < 96.0 {
+        theme::color([250, 250, 250, 255])
+    } else {
+        theme::color([38, 38, 38, 255])
+    };
+    theme::swatch(key, rgba, selected, pal)
+        .items_center()
+        .justify_center()
+        .child(icons::icon("add", 10.0, ink))
+}
+
+/// Presses outside the picker close it, the way a popover does.
+fn picker_scrim() -> El {
+    el().key("picker-scrim")
+        .absolute(0.0, 0.0)
+        .w_full()
+        .h_full()
+        .hit()
+        .on_press(|s: &mut DoodleApp| s.picker = None)
+}
+
+/// A shade of `rgba` mixed toward white (`t` > 0) or black (`t` < 0).
+fn shade(rgba: [u8; 4], t: f32) -> [u8; 4] {
+    let toward = if t >= 0.0 { 255.0 } else { 0.0 };
+    let mix = |channel: u8| {
+        let value = f32::from(channel);
+        (value + (toward - value) * t.abs())
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
+    [mix(rgba[0]), mix(rgba[1]), mix(rgba[2]), 255]
+}
+
+/// The custom-colour popover, anchored to the right of the tool panel the way Excalidraw opens
+/// its picker beside its panel: colours, a shade ramp for the current colour, and a hex field.
+/// It floats over the board without a scrim of its own, so the drawing stays visible while a
+/// colour is chosen; a press anywhere else closes it.
+fn colour_picker(s: &DoodleApp, pal: &Palette) -> El {
+    let target = s.picker.unwrap_or(ColourTarget::Stroke);
+    let current = match target {
+        ColourTarget::Stroke => s.color,
+        ColourTarget::Fill => s.fill_rgba,
+    };
+    let title = match target {
+        ColourTarget::Stroke => "Stroke colour",
+        ColourTarget::Fill => "Background colour",
+    };
+
+    let mut body = col().gap(10.0).w_full();
+    body = body.child(text(title).font(theme::heading(16.0)).color(pal.text));
+    body = body.child(text("Colors").font(theme::section_style()).color(pal.muted));
+
+    // One flat list of tiles, six to a line, so both rows line up however many choices the
+    // background adds.
+    let mut tiles: Vec<El> = Vec::new();
+    if target == ColourTarget::Fill {
+        // The transparent choice belongs to the background only; it clears the fill.
+        let selected = current[3] == 0;
+        tiles.push(
+            theme::swatch("picker-none", [0, 0, 0, 0], selected, pal)
+                .size(28.0, 28.0)
+                .items_center()
+                .justify_center()
+                .label("No fill")
+                .child(icons::icon("close", 12.0, pal.muted))
+                .on_press(|s: &mut DoodleApp| {
+                    s.fill_rgba = [0, 0, 0, 0];
+                    s.picker = None;
+                }),
+        );
+    }
+    for (index, rgba) in PICKER_COLOURS.iter().enumerate() {
+        let rgba = *rgba;
+        let selected = current == rgba;
+        tiles.push(
+            theme::swatch(format!("picker-{index}"), rgba, selected, pal)
+                .size(28.0, 28.0)
+                .on_press(move |s: &mut DoodleApp| {
+                    s.set_picker_colour(target, rgba);
+                    s.picker = None;
+                }),
+        );
+    }
+    for line in tiles.chunks(6) {
+        let mut line_row = row().gap(8.0).items_center();
+        for tile in line {
+            line_row = line_row.child(tile.clone());
+        }
+        body = body.child(line_row);
+    }
+
+    body = body.child(text("Shades").font(theme::section_style()).color(pal.muted));
+    let mut ramp = row().gap(8.0).items_center();
+    for (index, t) in [0.75_f32, 0.45, 0.0, -0.35, -0.65].iter().enumerate() {
+        let rgba = if *t == 0.0 {
+            current
+        } else {
+            shade(current, *t)
+        };
+        ramp = ramp.child(
+            theme::swatch(format!("picker-shade-{index}"), rgba, current == rgba, pal)
+                .size(28.0, 28.0)
+                .on_press(move |s: &mut DoodleApp| {
+                    s.set_picker_colour(target, rgba);
+                    s.picker = None;
+                }),
+        );
+    }
+    body = body.child(ramp);
+
+    body = body.child(
+        text("Hex code")
+            .font(theme::section_style())
+            .color(pal.muted),
+    );
+    let field = text_input(&s.picker_hex, rune::tok::type_::BODY)
+        .label("Hex colour")
+        .on_edit(edit_access(|s: &mut DoodleApp| &mut s.picker_hex))
+        .placeholder("#rrggbb", pal.muted)
+        .color(pal.text)
+        .caret(pal.text, pal.selection)
+        .single_line()
+        .grow(1.0)
+        .autofocus();
+    let apply = theme::flat_icon_button("picker-apply", pal)
+        .label("Apply hex colour")
+        .child(icons::icon("check", 16.0, pal.text))
+        .on_press(|s: &mut DoodleApp| s.apply_picker_hex());
+    body = body.child(
+        row()
+            .gap(6.0)
+            .w_full()
+            .items_center()
+            .child(
+                el().grow(1.0)
+                    .padding(8.0)
+                    .radius(8.0)
+                    .fill(pal.input)
+                    .border(1.0, pal.border)
+                    .child(field),
+            )
+            .child(apply),
+    );
+    if parse_hex(&s.picker_hex.text).is_none() && !s.picker_hex.text.is_empty() {
+        body = body.child(
+            text("Use a hex colour, like #e03131.")
+                .font(theme::caption())
+                .color(pal.danger),
+        );
+    }
+
+    let [px, py, pw, ph] = s.tool_panel_layout;
+    let (x, y) = if ph > 0.0 {
+        (px + pw + 8.0, py + 8.0)
+    } else {
+        (232.0, 72.0)
+    };
+    el().key("colour-picker").absolute(x, y).w(248.0).child(
+        theme::island(pal)
+            .w(248.0)
+            .padding(12.0)
+            .radius(theme::RADIUS_SURFACE)
+            .transition(Transition::scale(0.98))
+            .child(body),
+    )
+}
+
+/// A modal: a full-window scrim with the card centred inside it./// A modal: a full-window scrim with the card centred inside it. The root is the dialog; the
 /// pressable scrim keeps taking presses but announces nothing, and the card wrapper is a plain
 /// presentation box, so its copies and buttons belong to the dialog instead of becoming one large
 /// unnamed button. The modal trap holds Tab and Return inside the dialog, focuses its `autofocus`

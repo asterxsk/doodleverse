@@ -656,3 +656,22 @@ authorized GitHub remote.
 - **Risk if wrong:** a self-crossing pen loop fills its nonzero-interior region rather than each
   lobe separately, and a loop that does not quite close stays unfilled; both match freedraw
   behaviour rather than a closed-shape fill.
+
+### D50 — The custom colour picker is an anchored popover, not a dialog
+- **Because:** the first cut of the picker opened as a centred modal over a scrim, and the owner
+  asked for Excalidraw's shape instead: a panel that opens beside the tool panel, keeping the
+  board and the swatch rows visible while a colour is chosen.
+- **Decision:** the last swatch of the Stroke and Background rows carries the last custom colour
+  with a plus, and pressing it opens a 248pt card anchored to the right of the measured tool
+  panel (`tool_panel_layout`), with a picker scrim beneath it that closes it on an outside press
+  and swallows that press so it cannot start a stroke. The card holds twelve colours (the
+  background row adds a transparent tile first), a five-step shade ramp mixed from the current
+  colour, and a hex field with a check button; a colour tile applies and closes, the check
+  applies and keeps the panel open for tweaking. Hex accepts `#rgb` and `#rrggbb`; alpha stays
+  255 because opacity is the panel's own control.
+- **Alternatives:** keeping the modal (owner rejected it); live-applying valid hex on each
+  keystroke (the text field's accessor cannot read the new text inside the same edit); an
+  eyedropper (no screen-sampling API in the Rune host).
+- **Reversibility:** cheap — one view function and four fields on `DoodleApp`.
+- **Risk if wrong:** the popover can overlap the panel on very narrow windows; it falls back to
+  a fixed offset until the panel's layout is measured, which is the first frame only.

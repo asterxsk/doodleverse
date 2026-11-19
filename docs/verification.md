@@ -290,3 +290,8 @@ Headless pass at 1180×760, dark default, `artifacts/round4-*.png`.
 | A pen loop that returns to its start fills with the chosen background | `round4-fillloop-crop.png`: sand disc under the ring |
 | Wide stroke at 1599% zoom draws one smooth band | `round4-chunk-crop.png` |
 | Legacy stroke payloads without a fill decode to transparent | `cargo test -p doodle-files` (`snapshot_written_before_stroke_fill_still_decodes`) |
+
+| The Stroke row's last swatch opens the custom picker beside the panel | `round4-picker2-crop.png` |
+| A colour tile applies at once; the next stroke draws in it | `round4-pickapply-crop.png` (coral ring) |
+| A typed hex applies and the custom swatch takes it | `round4-hex.png`, `round4-hexswatch.png` (`#1f8a3b`) |
+| The Background picker offers transparent first and clears the fill | `round4-fillloop-crop.png` plus `picker-none` in the tree dump |
